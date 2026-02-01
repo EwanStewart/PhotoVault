@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photo Frame</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div id="slideshow">
+        <img id="photo-current" class="photo active" src="" alt="Photo slideshow">
+        <img id="photo-next" class="photo" src="" alt="Photo slideshow">
+    </div>
+
+    <!-- Loading indicator -->
+    <div id="photo-loading" class="photo-status">
+        <div class="spinner"></div>
+    </div>
+
+    <!-- Error message -->
+    <div id="photo-error" class="photo-status"></div>
+
+    <!-- Sync status -->
+    <div id="sync-status"></div>
+
+    <div id="overlay" class="hidden">
+        <div id="now-playing">
+            <img id="album-art" src="" alt="Album artwork">
+            <div id="track-info">
+                <div id="track-name">Not Playing</div>
+                <div id="track-artist"></div>
+                <div id="progress-bar">
+                    <div id="progress-fill"></div>
+                </div>
+            </div>
+            <div id="controls">
+                <button id="like-btn" class="control-btn" title="Save to Library" aria-label="Save to Library">&#x2661;</button>
+                <button id="pause-btn" class="control-btn" title="Pause" aria-label="Pause">&#x23F8;</button>
+                <button id="skip-btn" class="control-btn" title="Skip" aria-label="Skip to next track">&#x23ED;</button>
+                <button id="queue-btn" class="control-btn" title="Queue" aria-label="Show queue">&#x2630;</button>
+            </div>
+        </div>
+
+        <!-- Queue panel -->
+        <div id="queue-panel">
+            <div id="queue-header">Up Next</div>
+            <div id="queue-list"></div>
+        </div>
+    </div>
+
+    <div id="auth-prompt" class="hidden">
+        <a href="/auth/spotify">Connect Spotify</a>
+    </div>
+
+    <!-- Gesture indicators -->
+    <div id="brightness-indicator" class="gesture-indicator left">
+        <div class="indicator-fill"></div>
+        <span class="indicator-icon">&#x2600;</span>
+    </div>
+    <div id="volume-indicator" class="gesture-indicator right">
+        <div class="indicator-fill"></div>
+        <span class="indicator-icon">&#x1F50A;</span>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>

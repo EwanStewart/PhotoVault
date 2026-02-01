@@ -1,0 +1,27 @@
+services:
+  photoframe:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./photos:/app/photos:ro
+      - spotify_cache:/app/.cache
+      - /sys/class/backlight:/sys/class/backlight:ro
+      - /tmp:/tmp:rw
+    devices:
+      - /dev/snd:/dev/snd
+    cap_add:
+      - SYS_RAWIO
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  spotify_cache:
