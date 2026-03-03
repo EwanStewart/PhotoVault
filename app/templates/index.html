@@ -2,15 +2,30 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Photo Frame</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+    <!-- Blurred background layer -->
+    <div id="photo-bg"></div>
+
     <div id="slideshow">
         <img id="photo-current" class="photo active" src="" alt="Photo slideshow">
         <img id="photo-next" class="photo" src="" alt="Photo slideshow">
+        <video id="live-video" muted playsinline></video>
     </div>
+
+    <!-- Location badge -->
+    <div id="location-badge">
+        <span id="location-text"></span><img id="location-flag" class="flag-icon" src="" alt="">
+    </div>
+
+    <!-- Date badge -->
+    <div id="date-badge"></div>
+
+    <!-- Live Photo indicator -->
+    <div id="live-indicator">LIVE</div>
 
     <!-- Loading indicator -->
     <div id="photo-loading" class="photo-status">
@@ -60,6 +75,33 @@
     <div id="volume-indicator" class="gesture-indicator right">
         <div class="indicator-fill"></div>
         <span class="indicator-icon">&#x1F50A;</span>
+    </div>
+
+    <!-- Bulb control panel -->
+    <div id="bulb-panel">
+        <div id="bulb-panel-header">
+            <span>Lights</span>
+            <button id="bulb-close-btn" aria-label="Close panel">&times;</button>
+        </div>
+        <div id="bulb-bulk-controls">
+            <button id="bulb-all-on-btn" class="bulb-bulk-btn">All On</button>
+            <button id="bulb-all-off-btn" class="bulb-bulk-btn">All Off</button>
+        </div>
+        <div id="bulb-list">
+            <!-- Bulb cards will be populated dynamically -->
+        </div>
+        <div id="colour-palette">
+            <div class="colour-swatch" data-preset="warm_white" style="background: linear-gradient(135deg, #fff5e6, #ffecd2);" title="Warm White"></div>
+            <div class="colour-swatch" data-preset="cool_white" style="background: linear-gradient(135deg, #f0f8ff, #e6f2ff);" title="Cool White"></div>
+            <div class="colour-swatch" data-preset="red" style="background: #ff0000;" title="Red"></div>
+            <div class="colour-swatch" data-preset="orange" style="background: #ff8000;" title="Orange"></div>
+            <div class="colour-swatch" data-preset="yellow" style="background: #ffff00;" title="Yellow"></div>
+            <div class="colour-swatch" data-preset="green" style="background: #00ff00;" title="Green"></div>
+            <div class="colour-swatch" data-preset="blue" style="background: #0000ff;" title="Blue"></div>
+            <div class="colour-swatch" data-preset="purple" style="background: #9900ff;" title="Purple"></div>
+            <div class="colour-swatch" data-preset="pink" style="background: #ff66cc;" title="Pink"></div>
+            <div class="colour-swatch" data-preset="night_mode" style="background: linear-gradient(135deg, #1a0d00, #332200);" title="Night Mode"></div>
+        </div>
     </div>
 
     <script src="/static/script.js"></script>

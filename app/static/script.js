@@ -5,6 +5,7 @@ const OVERLAY_TIMEOUT = 10000; // Hide overlay after 10 seconds
 const SKIP_DEBOUNCE = 1000;   // Debounce skip button
 const DOUBLE_TAP_DELAY = 300;
 const SWIPE_THRESHOLD = 30;
+const HORIZONTAL_SWIPE_THRESHOLD = 50;  // Threshold to determine swipe direction
 
 // Gesture zone percentages
 const LEFT_ZONE_PERCENT = 0.125;   // Left 12.5% for brightness
@@ -14,6 +15,7 @@ const RIGHT_ZONE_PERCENT = 0.125;  // Right 12.5% for volume
 const state = {
     photos: [],
     currentIndex: 0,
+    currentPhoto: null,
     overlayVisible: false,
     isPlaying: false,
     isPaused: false,
@@ -26,7 +28,11 @@ const state = {
     theme: {
         accent_color: '#1DB954',
         overlay_opacity: 0.8
-    }
+    },
+    bulbPanelVisible: false,
+    bulbs: [],
+    selectedBulbId: null,
+    colourPresets: {}
 };
 
 // Timers
@@ -42,6 +48,7 @@ let touchStartY = 0;
 let touchStartTime = 0;
 let activeGesture = null;
 let gestureStartValue = 0;
+let gestureDirectionDetermined = false;
 
 // DOM elements
 const photoCurrent = document.getElementById('photo-current');
@@ -64,6 +71,97 @@ const authPrompt = document.getElementById('auth-prompt');
 const brightnessIndicator = document.getElementById('brightness-indicator');
 const volumeIndicator = document.getElementById('volume-indicator');
 const syncStatus = document.getElementById('sync-status');
+const locationBadge = document.getElementById('location-badge');
+const locationText = document.getElementById('location-text');
+const locationFlag = document.getElementById('location-flag');
+const dateBadge = document.getElementById('date-badge');
+const liveIndicator = document.getElementById('live-indicator');
+const liveVideo = document.getElementById('live-video');
+const photoBg = document.getElementById('photo-bg');
+const bulbPanel = document.getElementById('bulb-panel');
+const bulbList = document.getElementById('bulb-list');
+const bulbCloseBtn = document.getElementById('bulb-close-btn');
+const bulbAllOnBtn = document.getElementById('bulb-all-on-btn');
+const bulbAllOffBtn = document.getElementById('bulb-all-off-btn');
+const colourPalette = document.getElementById('colour-palette');
+
+
+// Preloaded image for next photo
+let preloadedImage = null;
+
+/**
+ * Format EXIF date string to human-readable format.
+ *
+ * @param exifDate Date string in EXIF format (YYYY:MM:DD HH:MM:SS)
+ * @returns Formatted date string or null if invalid
+ */
+function formatPhotoDate(exifDate) {
+    let formattedDate = null;
+
+    if (!exifDate) {
+        return formattedDate;
+    }
+
+    try {
+        // EXIF date format: "YYYY:MM:DD HH:MM:SS"
+        const parts = exifDate.split(' ');
+        const dateParts = parts[0].split(':');
+
+        if (dateParts.length >= 3) {
+            const year = parseInt(dateParts[0], 10);
+            const month = parseInt(dateParts[1], 10) - 1;
+            const day = parseInt(dateParts[2], 10);
+
+            const date = new Date(year, month, day);
+
+            // Format as "15 January 2024"
+            formattedDate = date.toLocaleDateString('en-GB', {
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric'
+            });
+        }
+    } catch (error) {
+        console.error('Failed to parse date:', exifDate, error);
+    }
+
+    return formattedDate;
+}
+
+/**
+ * Shuffle array in place using Fisher-Yates algorithm.
+ *
+ * @param array Array to shuffle
+ * @returns The shuffled array
+ */
+function shuffleArray(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+    }
+
+    return array;
+}
+
+/**
+ * Preload the next photo in the slideshow.
+ */
+function preloadNextPhoto() {
+    if (state.photos.length <= 1) {
+        return;
+    }
+
+    const nextIndex = (state.currentIndex + 1) % state.photos.length;
+    const nextPhoto = state.photos[nextIndex];
+    const filename = typeof nextPhoto === 'string' ? nextPhoto : nextPhoto.filename;
+
+    preloadedImage = new Image();
+    preloadedImage.src = `/photos/${encodeURIComponent(filename)}`;
+}
+
+// Live Photo tracking
+let longPressTimer = null;
+let isLiveVideoPlaying = false;
 
 // === Photo Management ===
 
@@ -73,8 +171,8 @@ async function loadPhotos() {
         const response = await fetch('/photos');
         const data = await response.json();
 
-        // Handle new API format (array of objects with filename)
-        state.photos = data.map(p => typeof p === 'string' ? p : p.filename);
+        // Keep full photo objects with metadata
+        state.photos = shuffleArray(data);
 
         if (state.photos.length > 0) {
             showPhoto(0);
@@ -110,7 +208,13 @@ function hidePhotoError() {
 }
 
 function showPhoto(index) {
-    if (state.photos.length === 0) return;
+    if (state.photos.length === 0) {
+        return;
+    }
+
+    const photo = state.photos[index];
+    const filename = typeof photo === 'string' ? photo : photo.filename;
+    const photoUrl = `/photos/${encodeURIComponent(filename)}`;
 
     const nextImg = photoCurrent.classList.contains('active') ? photoNext : photoCurrent;
     const currentImg = photoCurrent.classList.contains('active') ? photoCurrent : photoNext;
@@ -118,15 +222,37 @@ function showPhoto(index) {
     showPhotoLoading(true);
     hidePhotoError();
 
-    const img = new Image();
+    // Check if this image was preloaded
+    let img;
+    if (preloadedImage && preloadedImage.src.endsWith(encodeURIComponent(filename))) {
+        img = preloadedImage;
+        preloadedImage = null;
+    } else {
+        img = new Image();
+        img.src = photoUrl;
+    }
+
     img.onload = () => {
         nextImg.src = img.src;
         nextImg.classList.add('active');
         currentImg.classList.remove('active');
         showPhotoLoading(false);
+
+        // Update blurred background
+        if (photoBg) {
+            photoBg.style.backgroundImage = `url('${img.src}')`;
+        }
+
+        // Update current photo and display info
+        state.currentPhoto = photo;
+        updatePhotoInfo(photo);
+
+        // Preload next photo
+        preloadNextPhoto();
     };
+
     img.onerror = () => {
-        console.error('Failed to load photo:', state.photos[index]);
+        console.error('Failed to load photo:', filename);
         showPhotoLoading(false);
         // Try next photo
         state.currentIndex = (state.currentIndex + 1) % state.photos.length;
@@ -136,7 +262,52 @@ function showPhoto(index) {
             showPhotoError('Failed to load photo');
         }
     };
-    img.src = `/photos/${encodeURIComponent(state.photos[index])}`;
+
+    // If we created a new image (not preloaded), we already set the src above
+    // For preloaded images, if already loaded, onload may not fire, so check
+    if (img.complete && img.naturalWidth > 0) {
+        img.onload();
+    }
+}
+function updatePhotoInfo(photo) {
+
+    // Update location badge
+    if (photo.location && locationBadge && locationText) {
+        locationText.textContent = photo.location;
+        if (locationFlag) {
+            if (photo.country_code) {
+                locationFlag.src = '/flags/' + photo.country_code + '.svg';
+                locationFlag.classList.add('visible');
+            } else {
+                locationFlag.classList.remove('visible');
+            }
+        }
+        locationBadge.classList.add('visible');
+    } else if (locationBadge) {
+        locationBadge.classList.remove('visible');
+        if (locationFlag) {
+            locationFlag.classList.remove('visible');
+        }
+    }
+
+
+    // Update date badge
+    if (photo.date_taken && dateBadge) {
+        const dateStr = formatPhotoDate(photo.date_taken);
+        if (dateStr) {
+            dateBadge.textContent = dateStr;
+            dateBadge.classList.add('visible');
+        } else {
+            dateBadge.classList.remove('visible');
+        }
+    } else if (dateBadge) {
+        dateBadge.classList.remove('visible');
+    }
+
+    // Update Live Photo indicator
+    if (liveIndicator) {
+        liveIndicator.classList.toggle('visible', !!photo.isLivePhoto);
+    }
 }
 
 function startSlideshow() {
@@ -449,21 +620,6 @@ async function toggleDisplay() {
     }
 }
 
-// === Adaptive Brightness ===
-
-async function checkAutoBrightness() {
-    try {
-        const response = await fetch('/api/brightness/auto');
-        const data = await response.json();
-
-        // Only auto-adjust if difference is significant (>30)
-        if (Math.abs(state.currentBrightness - data.recommended) > 30) {
-            await setBrightness(data.recommended);
-        }
-    } catch (error) {
-        console.error('Failed to check auto brightness:', error);
-    }
-}
 
 // === Sync Status ===
 
@@ -537,6 +693,340 @@ function hideIndicator(indicator) {
     indicatorTimers.set(indicator, timer);
 }
 
+// === Live Photo Playback ===
+
+function playLiveVideo(photo) {
+    if (!liveVideo || !photo.videoFilename) return;
+
+    isLiveVideoPlaying = true;
+    liveVideo.src = `/photos/video/${encodeURIComponent(photo.videoFilename)}`;
+    liveVideo.currentTime = 0;
+    liveVideo.play();
+    liveVideo.classList.add('playing');
+
+    // Stop when video ends
+    liveVideo.onended = () => {
+        stopLiveVideo();
+    };
+}
+
+function stopLiveVideo() {
+    if (!liveVideo) return;
+
+    isLiveVideoPlaying = false;
+    liveVideo.pause();
+    liveVideo.classList.remove('playing');
+    liveVideo.src = '';
+}
+
+function handleLivePhotoPress(photo) {
+    if (!photo || !photo.isLivePhoto) return;
+
+    longPressTimer = setTimeout(() => {
+        playLiveVideo(photo);
+    }, 500); // 500ms hold to trigger
+}
+
+function handleLivePhotoRelease() {
+    if (longPressTimer) {
+        clearTimeout(longPressTimer);
+        longPressTimer = null;
+    }
+    if (isLiveVideoPlaying) {
+        stopLiveVideo();
+    }
+}
+
+// === Bulb Panel ===
+
+function openBulbPanel() {
+    if (!bulbPanel) return;
+
+    state.bulbPanelVisible = true;
+    bulbPanel.classList.add('visible');
+    loadBulbStates();
+}
+
+function closeBulbPanel() {
+    if (!bulbPanel) return;
+
+    state.bulbPanelVisible = false;
+    state.selectedBulbId = null;
+    bulbPanel.classList.remove('visible');
+
+    // Clear colour swatch selection
+    const swatches = document.querySelectorAll('.colour-swatch');
+    swatches.forEach(swatch => swatch.classList.remove('selected'));
+}
+
+async function loadBulbStates() {
+    if (!bulbList) return;
+
+    bulbList.classList.add('loading');
+    bulbList.innerHTML = '';
+
+    try {
+        const response = await fetch('/api/bulbs');
+        const data = await response.json();
+
+        if (data.error) {
+            bulbList.innerHTML = `<div class="bulb-error">${escapeHtml(data.error)}</div>`;
+        } else {
+            state.bulbs = data.bulbs || [];
+            state.colourPresets = data.presets || {};
+            renderBulbList();
+        }
+    } catch (error) {
+        console.error('Failed to load bulb states:', error);
+        bulbList.innerHTML = '<div class="bulb-error">Failed to load bulbs</div>';
+    } finally {
+        bulbList.classList.remove('loading');
+    }
+}
+
+function renderBulbList() {
+    if (!bulbList) return;
+
+    bulbList.innerHTML = '';
+
+    if (state.bulbs.length === 0) {
+        bulbList.innerHTML = '<div class="bulb-empty">No bulbs configured</div>';
+        return;
+    }
+
+    state.bulbs.forEach(bulb => {
+        const card = createBulbCard(bulb);
+        bulbList.appendChild(card);
+    });
+}
+
+function createBulbCard(bulb) {
+    const card = document.createElement('div');
+    card.className = 'bulb-card';
+    card.dataset.bulbId = bulb.id;
+
+    if (!bulb.connected) {
+        card.classList.add('disconnected');
+    }
+
+    if (state.selectedBulbId === bulb.id) {
+        card.classList.add('selected');
+    }
+
+    const statusDotClass = bulb.connected ? 'connected' : 'disconnected';
+    const statusText = bulb.connected ? (bulb.is_on ? 'On' : 'Off') : 'Disconnected';
+    const toggleClass = bulb.is_on ? 'on' : '';
+    const colourStyle = getColourStyle(bulb);
+
+    let cardContent = `
+        <div class="bulb-status-dot ${statusDotClass}"></div>
+        <div class="bulb-info">
+            <div class="bulb-name">${escapeHtml(bulb.name || 'Bulb ' + bulb.id)}</div>
+            <div class="bulb-status-text">${statusText}</div>
+        </div>
+    `;
+
+    if (bulb.connected) {
+        cardContent += `
+            <button class="bulb-colour-btn" style="${colourStyle}"
+                    data-bulb-id="${bulb.id}"
+                    title="Select for colour change"
+                    aria-label="Select bulb for colour change"></button>
+            <button class="bulb-toggle ${toggleClass}"
+                    data-bulb-id="${bulb.id}"
+                    aria-label="${bulb.is_on ? 'Turn off' : 'Turn on'}"></button>
+        `;
+    } else {
+        cardContent += `
+            <button class="bulb-retry-btn" data-bulb-id="${bulb.id}">Retry</button>
+        `;
+    }
+
+    card.innerHTML = cardContent;
+
+    // Add event listeners
+    const toggle = card.querySelector('.bulb-toggle');
+    if (toggle) {
+        toggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleBulb(bulb.id, !bulb.is_on);
+        });
+    }
+
+    const colourBtn = card.querySelector('.bulb-colour-btn');
+    if (colourBtn) {
+        colourBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            selectBulbForColour(bulb.id);
+        });
+    }
+
+    const retryBtn = card.querySelector('.bulb-retry-btn');
+    if (retryBtn) {
+        retryBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            reconnectBulb(bulb.id);
+        });
+    }
+
+    return card;
+}
+
+function getColourStyle(bulb) {
+    if (!bulb.connected || bulb.hue === undefined) {
+        return 'background: #888;';
+    }
+
+    const hue = bulb.hue || 0;
+    const saturation = bulb.saturation || 100;
+    const lightness = Math.min(50 + (bulb.brightness || 100) / 4, 75);
+
+    return `background: hsl(${hue}, ${saturation}%, ${lightness}%);`;
+}
+
+function selectBulbForColour(bulbId) {
+    // Toggle selection
+    if (state.selectedBulbId === bulbId) {
+        state.selectedBulbId = null;
+    } else {
+        state.selectedBulbId = bulbId;
+    }
+
+    // Update card selection state
+    const cards = document.querySelectorAll('.bulb-card');
+    cards.forEach(card => {
+        card.classList.toggle('selected', card.dataset.bulbId === state.selectedBulbId);
+    });
+}
+
+async function toggleBulb(bulbId, powerOn) {
+    // Optimistic update
+    const bulb = state.bulbs.find(b => b.id === bulbId);
+    if (bulb) {
+        bulb.is_on = powerOn;
+        renderBulbList();
+    }
+
+    try {
+        const response = await fetch(`/api/bulbs/${bulbId}/power`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ power: powerOn })
+        });
+
+        const result = await response.json();
+
+        if (!result.success) {
+            // Revert on failure
+            if (bulb) {
+                bulb.is_on = !powerOn;
+            }
+            console.error('Failed to toggle bulb:', result.error);
+        }
+
+        // Refresh actual state
+        await loadBulbStates();
+    } catch (error) {
+        console.error('Failed to toggle bulb:', error);
+        // Revert on failure
+        if (bulb) {
+            bulb.is_on = !powerOn;
+            renderBulbList();
+        }
+    }
+}
+
+async function setAllBulbsPower(powerOn) {
+    // Disable buttons during operation
+    if (bulbAllOnBtn) bulbAllOnBtn.disabled = true;
+    if (bulbAllOffBtn) bulbAllOffBtn.disabled = true;
+
+    try {
+        const response = await fetch('/api/bulbs/all/power', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ power: powerOn })
+        });
+
+        const result = await response.json();
+
+        if (result.success_count < result.total_count) {
+            console.warn(`Bulk power: ${result.success_count}/${result.total_count} succeeded`);
+        }
+
+        // Refresh state
+        await loadBulbStates();
+    } catch (error) {
+        console.error('Failed to set all bulbs power:', error);
+    } finally {
+        if (bulbAllOnBtn) bulbAllOnBtn.disabled = false;
+        if (bulbAllOffBtn) bulbAllOffBtn.disabled = false;
+    }
+}
+
+async function setBulbColour(presetName) {
+    const targetBulbId = state.selectedBulbId;
+
+    try {
+        let url = '';
+
+        if (targetBulbId) {
+            // Set colour for selected bulb only
+            url = `/api/bulbs/${targetBulbId}/colour`;
+        } else {
+            // Set colour for all bulbs
+            url = '/api/bulbs/all/colour';
+        }
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ preset: presetName })
+        });
+
+        const result = await response.json();
+
+        if (!result.success && !result.success_count) {
+            console.error('Failed to set colour:', result.error);
+        }
+
+        // Refresh state
+        await loadBulbStates();
+    } catch (error) {
+        console.error('Failed to set bulb colour:', error);
+    }
+}
+
+async function reconnectBulb(bulbId) {
+    // Show loading state on the retry button
+    const retryBtn = document.querySelector(`.bulb-retry-btn[data-bulb-id="${bulbId}"]`);
+    if (retryBtn) {
+        retryBtn.textContent = 'Connecting';
+        retryBtn.disabled = true;
+    }
+
+    try {
+        const response = await fetch(`/api/bulbs/${bulbId}/reconnect`, {
+            method: 'POST'
+        });
+
+        const result = await response.json();
+
+        if (!result.success) {
+            console.error(`Failed to reconnect bulb ${bulbId}:`, result.error);
+        }
+
+        // Refresh state
+        await loadBulbStates();
+    } catch (error) {
+        console.error('Failed to reconnect bulb:', error);
+        if (retryBtn) {
+            retryBtn.textContent = 'Retry';
+            retryBtn.disabled = false;
+        }
+    }
+}
+
 // === Gesture Detection ===
 
 function getGestureZone(x) {
@@ -554,6 +1044,7 @@ function handleTouchStart(e) {
     touchStartX = touch.clientX;
     touchStartY = touch.clientY;
     touchStartTime = Date.now();
+    gestureDirectionDetermined = false;
 
     const zone = getGestureZone(touchStartX);
 
@@ -562,11 +1053,16 @@ function handleTouchStart(e) {
         gestureStartValue = state.currentBrightness;
         showIndicator(brightnessIndicator, state.currentBrightness / 255 * 100);
     } else if (zone === 'volume') {
-        activeGesture = 'volume';
+        // For right edge, we need to determine direction first
+        // Start as potential volume gesture, may switch to panel swipe
+        activeGesture = 'volume_or_panel';
         gestureStartValue = state.currentVolume;
-        showIndicator(volumeIndicator, state.currentVolume);
     } else {
         activeGesture = null;
+        // Start Live Photo long-press detection in center zone
+        if (state.currentPhoto && state.currentPhoto.isLivePhoto) {
+            handleLivePhotoPress(state.currentPhoto);
+        }
     }
 }
 
@@ -574,10 +1070,32 @@ function handleTouchMove(e) {
     if (!activeGesture) return;
 
     const touch = e.touches[0];
+    const deltaX = touchStartX - touch.clientX; // Positive = swipe left
     const deltaY = touchStartY - touch.clientY; // Positive = swipe up
 
     // Prevent default to avoid scrolling
     e.preventDefault();
+
+    // For right edge, determine gesture direction after threshold
+    if (activeGesture === 'volume_or_panel' && !gestureDirectionDetermined) {
+        const absX = Math.abs(deltaX);
+        const absY = Math.abs(deltaY);
+
+        if (absX >= HORIZONTAL_SWIPE_THRESHOLD || absY >= HORIZONTAL_SWIPE_THRESHOLD) {
+            gestureDirectionDetermined = true;
+
+            if (absX > absY && deltaX > 0) {
+                // Horizontal swipe left from right edge - open bulb panel
+                activeGesture = 'panel_swipe';
+                openBulbPanel();
+            } else {
+                // Vertical swipe - volume control
+                activeGesture = 'volume';
+                showIndicator(volumeIndicator, state.currentVolume);
+            }
+        }
+        return;
+    }
 
     // Calculate change: 200px swipe = full range
     const sensitivity = 200;
@@ -597,8 +1115,11 @@ function handleTouchEnd(e) {
     const touchEndTime = Date.now();
     const touchDuration = touchEndTime - touchStartTime;
 
+    // Handle Live Photo release
+    handleLivePhotoRelease();
+
     // Check for double tap (only in center zone)
-    if (!activeGesture && touchDuration < 300) {
+    if (!activeGesture && touchDuration < 300 && !isLiveVideoPlaying) {
         if (touchEndTime - lastTapTime < DOUBLE_TAP_DELAY) {
             // Double tap detected
             toggleDisplay();
@@ -622,9 +1143,13 @@ function handleTouchEnd(e) {
         hideIndicator(brightnessIndicator);
     } else if (activeGesture === 'volume') {
         hideIndicator(volumeIndicator);
+    } else if (activeGesture === 'volume_or_panel' && !gestureDirectionDetermined) {
+        // Quick tap in right zone without direction determined
+        hideIndicator(volumeIndicator);
     }
 
     activeGesture = null;
+    gestureDirectionDetermined = false;
 }
 
 // === Event Listeners ===
@@ -649,6 +1174,72 @@ if (skipBtn) skipBtn.addEventListener('click', skipTrack);
 if (pauseBtn) pauseBtn.addEventListener('click', togglePlayback);
 if (likeBtn) likeBtn.addEventListener('click', toggleLike);
 if (queueBtn) queueBtn.addEventListener('click', toggleQueue);
+
+// Bulb panel event listeners
+if (bulbCloseBtn) {
+    bulbCloseBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeBulbPanel();
+    });
+}
+
+if (bulbAllOnBtn) {
+    bulbAllOnBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setAllBulbsPower(true);
+    });
+}
+
+if (bulbAllOffBtn) {
+    bulbAllOffBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        setAllBulbsPower(false);
+    });
+}
+
+// Colour swatch event listeners
+if (colourPalette) {
+    const swatches = colourPalette.querySelectorAll('.colour-swatch');
+    swatches.forEach(swatch => {
+        swatch.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const presetName = swatch.dataset.preset;
+            if (presetName) {
+                // Update selection visual
+                swatches.forEach(s => s.classList.remove('selected'));
+                swatch.classList.add('selected');
+                setBulbColour(presetName);
+            }
+        });
+    });
+}
+
+// Prevent bulb panel clicks from closing or propagating
+if (bulbPanel) {
+    bulbPanel.addEventListener('click', (e) => {
+        e.stopPropagation();
+    });
+
+    bulbPanel.addEventListener('touchend', (e) => {
+        e.stopPropagation();
+    });
+
+    // Handle swipe right to close panel
+    let panelTouchStartX = 0;
+    bulbPanel.addEventListener('touchstart', (e) => {
+        panelTouchStartX = e.touches[0].clientX;
+    }, { passive: true });
+
+    bulbPanel.addEventListener('touchend', (e) => {
+        if (e.changedTouches && e.changedTouches[0]) {
+            const deltaX = e.changedTouches[0].clientX - panelTouchStartX;
+            // Swipe right to close
+            if (deltaX > 50) {
+                closeBulbPanel();
+            }
+        }
+    }, { passive: true });
+}
 
 // Prevent overlay clicks from toggling
 if (overlay) {
@@ -678,10 +1269,6 @@ async function init() {
     setInterval(loadPhotos, 300000);  // Refresh photos every 5 minutes
     setInterval(loadSyncStatus, 60000);  // Check sync status every minute
 
-    // Check auto-brightness every hour
-    setInterval(checkAutoBrightness, 3600000);
-    // Initial check after 5 seconds
-    setTimeout(checkAutoBrightness, 5000);
 }
 
 init();

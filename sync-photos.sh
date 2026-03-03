@@ -2,7 +2,7 @@
 # Sync photos from Google Drive
 # Run manually or via cron
 
-PHOTOS_DIR="${PHOTOS_DIR:-/home/pi/photoframe/photos}"
+PHOTOS_DIR="${PHOTOS_DIR:-/home/ewastewa/photoframe/photos}"
 SYNC_STATUS_FILE="/tmp/photoframe_sync_status"
 LOG_FILE="/tmp/photoframe_sync.log"
 
@@ -19,13 +19,16 @@ log "Starting photo sync..."
 
 # Run rclone sync
 if rclone sync gdrive:PhotoFrame "$PHOTOS_DIR" --exclude ".*" --exclude "*.tmp" 2>&1 | tee -a "$LOG_FILE"; then
-    # Count photos
-    PHOTO_COUNT=$(find "$PHOTOS_DIR" -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o -iname "*.gif" -o -iname "*.webp" -o -iname "*.bmp" \) | wc -l)
+    # Count photos (including HEIC)
+    PHOTO_COUNT=$(find "$PHOTOS_DIR" -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o -iname "*.gif" -o -iname "*.webp" -o -iname "*.bmp" -o -iname "*.heic" \) | wc -l)
+
+    # Count Live Photo videos
+    VIDEO_COUNT=$(find "$PHOTOS_DIR" -type f -iname "*.mov" | wc -l)
 
     # Write status file
     echo "$(date -Iseconds)|success|$PHOTO_COUNT" > "$SYNC_STATUS_FILE"
 
-    log "Photo sync complete: $PHOTO_COUNT photos"
+    log "Photo sync complete: $PHOTO_COUNT photos, $VIDEO_COUNT Live Photo videos"
 else
     # Write error status
     echo "$(date -Iseconds)|error|0" > "$SYNC_STATUS_FILE"

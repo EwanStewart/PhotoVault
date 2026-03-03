@@ -61,14 +61,14 @@ During `02-configure-rclone.sh`:
 
 **Container not starting:**
 ```bash
-cd /home/pi/photoframe
+cd /home/ewastewa/photoframe
 docker-compose logs
 ```
 
 **Photos not appearing:**
 ```bash
 ./sync-photos.sh
-ls /home/pi/photoframe/photos
+ls /home/ewastewa/photoframe/photos
 ```
 
 **Spotify not connecting:**

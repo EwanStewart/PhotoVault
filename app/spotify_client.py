@@ -6,7 +6,7 @@ from spotipy.oauth2 import SpotifyOAuth
 logger = logging.getLogger(__name__)
 
 SCOPE = 'user-read-playback-state user-modify-playback-state user-read-currently-playing user-library-modify user-library-read'
-CACHE_PATH = '/app/.cache/spotify_token'
+CACHE_PATH = os.environ.get('SPOTIFY_CACHE', '/home/ewastewa/photoframe/.cache/spotify_token')
 
 
 class SpotifyClient:
@@ -55,11 +55,12 @@ class SpotifyClient:
                 return None
             try:
                 token_info = self._sp_oauth.refresh_access_token(token_info['refresh_token'])
-                self._sp = spotipy.Spotify(auth=token_info['access_token'])
             except Exception as e:
                 logger.error(f"Token refresh failed: {e}")
                 return None
 
+        # Always create fresh client with current token
+        self._sp = spotipy.Spotify(auth=token_info['access_token'])
         return self._sp
 
     def is_authenticated(self):
