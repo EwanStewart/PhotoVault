@@ -1,12 +1,10 @@
 import os
-import io
 import json
 import logging
 import time
 import urllib.request
 import urllib.error
-from datetime import datetime
-from flask import Flask, render_template, jsonify, send_from_directory, redirect, request, session, send_file
+from flask import Flask, render_template, jsonify, send_from_directory, redirect, request, send_file
 from spotify_client import SpotifyClient
 from tapo_client import TapoBulbClient, COLOUR_PRESETS
 import pycountry
@@ -451,7 +449,6 @@ def serve_video(filename):
 def serve_flag(country_code):
     """Serve country flag SVG with local caching."""
     import re
-    import urllib.request
 
     # Validate country code (2 lowercase letters only)
     if not re.match(r'^[a-z]{2}(-[a-z]{3})?$', country_code):
@@ -703,7 +700,6 @@ def theme():
         try:
             if os.path.exists(theme_file):
                 with open(theme_file, 'r') as f:
-                    import json
                     return jsonify(json.load(f))
         except Exception:
             pass
@@ -720,7 +716,6 @@ def theme():
         return jsonify({'error': 'Invalid JSON', 'error_type': 'request'}), 400
 
     try:
-        import json
         with open(theme_file, 'w') as f:
             json.dump(data, f)
         return jsonify({'success': True})

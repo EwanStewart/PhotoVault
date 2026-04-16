@@ -502,10 +502,3 @@ class TapoBulbClient:
         """
         return self._run_async(self._reconnect_bulb_async(bulb_id))
 
-    def get_colour_presets(self) -> Dict[str, Dict[str, int]]:
-        """
-        Get available colour presets.
-
-        @returns Dictionary of colour presets with HSB values
-        """
-        return COLOUR_PRESETS.copy()

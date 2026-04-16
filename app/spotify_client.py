@@ -187,19 +187,6 @@ class SpotifyClient:
             logger.error(f"Save track error: {e}")
             return False
 
-    def unsave_current_track(self):
-        """Remove current track from user's library."""
-        sp = self._get_valid_client()
-        if not sp or not self._current_track_id:
-            return False
-
-        try:
-            sp.current_user_saved_tracks_delete([self._current_track_id])
-            return True
-        except Exception as e:
-            logger.error(f"Unsave track error: {e}")
-            return False
-
     def get_queue(self):
         """Get upcoming tracks in queue."""
         sp = self._get_valid_client()

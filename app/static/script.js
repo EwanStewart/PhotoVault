@@ -322,13 +322,6 @@ function startSlideshow() {
     }, SLIDE_INTERVAL);
 }
 
-function stopSlideshow() {
-    if (slideshowInterval) {
-        clearInterval(slideshowInterval);
-        slideshowInterval = null;
-    }
-}
-
 // === Spotify Integration ===
 
 async function pollNowPlaying() {
@@ -416,12 +409,6 @@ function toggleOverlay() {
         clearOverlayTimer();
         hideQueue();
     }
-}
-
-function showOverlayTemporarily() {
-    overlay.classList.remove('hidden');
-    state.overlayVisible = true;
-    resetOverlayTimer();
 }
 
 function resetOverlayTimer() {
