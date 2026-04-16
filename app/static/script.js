@@ -754,7 +754,6 @@ function openBulbPanel() {
     state.bulbPanelVisible = true;
     bulbPanel.classList.add('visible');
     if (bulbTab) bulbTab.classList.add('hidden');
-    if (brightnessSlider) brightnessSlider.value = state.currentBrightness;
     loadBulbStates();
 }
 
@@ -787,6 +786,16 @@ async function loadBulbStates() {
             state.bulbs = data.bulbs || [];
             state.colourPresets = data.presets || {};
             renderBulbList();
+
+            // Sync brightness slider to selected or first on bulb
+            if (brightnessSlider) {
+                const target = state.selectedBulbId
+                    ? state.bulbs.find(b => b.id === state.selectedBulbId)
+                    : state.bulbs.find(b => b.connected && b.is_on);
+                if (target && target.brightness !== undefined) {
+                    brightnessSlider.value = target.brightness;
+                }
+            }
         }
     } catch (error) {
         console.error('Failed to load bulb states:', error);
@@ -1009,6 +1018,32 @@ async function setBulbColour(presetName) {
     }
 }
 
+async function setBulbBrightness(brightness) {
+    const targetBulbId = state.selectedBulbId;
+
+    try {
+        const url = targetBulbId
+            ? `/api/bulbs/${targetBulbId}/brightness`
+            : '/api/bulbs/all/brightness';
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ brightness })
+        });
+
+        const result = await response.json();
+
+        if (!result.success && !result.success_count) {
+            console.error('Failed to set bulb brightness:', result.error);
+        }
+
+        await loadBulbStates();
+    } catch (error) {
+        console.error('Failed to set bulb brightness:', error);
+    }
+}
+
 async function reconnectBulb(bulbId) {
     // Show loading state on the retry button
     const retryBtn = document.querySelector(`.bulb-retry-btn[data-bulb-id="${bulbId}"]`);
@@ -1199,11 +1234,18 @@ if (bulbTab) {
     });
 }
 
-// Brightness slider event listener
+// Bulb brightness slider event listener
 if (brightnessSlider) {
+    let bulbBrightnessTimeout = null;
+
     brightnessSlider.addEventListener('input', (e) => {
         e.stopPropagation();
-        setBrightness(parseInt(e.target.value, 10));
+        const brightness = parseInt(e.target.value, 10);
+
+        if (bulbBrightnessTimeout) clearTimeout(bulbBrightnessTimeout);
+        bulbBrightnessTimeout = setTimeout(() => {
+            setBulbBrightness(brightness);
+        }, 100);
     });
 
     brightnessSlider.addEventListener('touchstart', (e) => {

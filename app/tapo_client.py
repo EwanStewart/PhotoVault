@@ -393,6 +393,94 @@ class TapoBulbClient:
             self._set_bulb_colour_async(bulb_id, hue, saturation, brightness)
         )
 
+    async def _set_bulb_brightness_async(
+        self, bulb_id: str, brightness: int
+    ) -> Dict[str, Any]:
+        """
+        Set brightness for a single bulb, preserving its current colour.
+
+        @param bulb_id The ID of the bulb to control
+        @param brightness Brightness level (1-100)
+        @returns Result dictionary with success status
+        """
+        result = {'bulb_id': bulb_id, 'success': False, 'error': None}
+
+        if bulb_id not in self._bulbs:
+            result['error'] = f"Bulb {bulb_id} not found"
+        else:
+            bulb = self._bulbs[bulb_id]
+
+            if not bulb.is_connected or not bulb.device:
+                result['error'] = "Bulb not connected"
+            else:
+                try:
+                    if not bulb.device.is_on:
+                        await bulb.device.turn_on()
+
+                    hue = 0
+                    saturation = 0
+                    if hasattr(bulb.device, 'hsv') and bulb.device.hsv:
+                        hue = bulb.device.hsv[0]
+                        saturation = bulb.device.hsv[1]
+
+                    await bulb.device.set_hsv(hue, saturation, brightness)
+                    await bulb.device.update()
+                    result['success'] = True
+                except Exception as error:
+                    result['error'] = str(error)
+                    bulb.is_connected = False
+                    bulb.last_error = str(error)
+
+        return result
+
+    def set_bulb_brightness(self, bulb_id: str, brightness: int) -> Dict[str, Any]:
+        """
+        Set brightness for a single bulb.
+
+        @param bulb_id The ID of the bulb to control
+        @param brightness Brightness level (1-100)
+        @returns Result dictionary with success status
+        """
+        return self._run_async(self._set_bulb_brightness_async(bulb_id, brightness))
+
+    async def _set_all_brightness_async(self, brightness: int) -> Dict[str, Any]:
+        """
+        Set brightness for all bulbs asynchronously.
+
+        @param brightness Brightness level (1-100)
+        @returns Result dictionary with success count and individual results
+        """
+        tasks = [
+            self._set_bulb_brightness_async(bulb_id, brightness)
+            for bulb_id in self._bulbs
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        resolved = []
+        success_count = 0
+        for r in results:
+            if isinstance(r, Exception):
+                resolved.append({'success': False, 'error': str(r)})
+            else:
+                resolved.append(r)
+                if r['success']:
+                    success_count += 1
+
+        return {
+            'success_count': success_count,
+            'total_count': len(self._bulbs),
+            'results': resolved
+        }
+
+    def set_all_brightness(self, brightness: int) -> Dict[str, Any]:
+        """
+        Set brightness for all bulbs.
+
+        @param brightness Brightness level (1-100)
+        @returns Result dictionary with success count and individual results
+        """
+        return self._run_async(self._set_all_brightness_async(brightness))
+
     async def _set_all_power_async(self, power_on: bool) -> Dict[str, Any]:
         """
         Set power state for all bulbs asynchronously.

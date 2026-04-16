@@ -880,6 +880,51 @@ def set_all_bulbs_colour():
         return jsonify({'error': str(error), 'error_type': 'bulb'}), 500
 
 
+@app.route('/api/bulbs/<bulb_id>/brightness', methods=['POST'])
+def set_bulb_brightness(bulb_id):
+    """
+    Set brightness for a single bulb, preserving its current colour.
+
+    @param bulb_id The ID of the bulb to control
+    @returns JSON result with success status
+    """
+    data = get_json_or_error()
+    if data is None:
+        return jsonify({'error': 'Invalid JSON', 'error_type': 'request'}), 400
+
+    brightness_level = max(1, min(100, int(data.get('brightness', 100))))
+
+    try:
+        result = tapo.set_bulb_brightness(bulb_id, brightness_level)
+        if result['success']:
+            return jsonify(result)
+        return jsonify(result), 500
+    except Exception as error:
+        logger.error("Failed to set bulb %s brightness: %s", bulb_id, error)
+        return jsonify({'error': str(error), 'error_type': 'bulb'}), 500
+
+
+@app.route('/api/bulbs/all/brightness', methods=['POST'])
+def set_all_bulbs_brightness():
+    """
+    Set brightness for all bulbs, preserving their current colours.
+
+    @returns JSON result with success count and individual results
+    """
+    data = get_json_or_error()
+    if data is None:
+        return jsonify({'error': 'Invalid JSON', 'error_type': 'request'}), 400
+
+    brightness_level = max(1, min(100, int(data.get('brightness', 100))))
+
+    try:
+        result = tapo.set_all_brightness(brightness_level)
+        return jsonify(result)
+    except Exception as error:
+        logger.error("Failed to set all bulbs brightness: %s", error)
+        return jsonify({'error': str(error), 'error_type': 'bulb'}), 500
+
+
 @app.route('/api/bulbs/<bulb_id>/reconnect', methods=['POST'])
 def reconnect_bulb(bulb_id):
     """
