@@ -360,6 +360,11 @@ async function pollNowPlaying() {
 
             // Update like button state
             updateLikeButton();
+
+            // Show overlay while music is playing
+            overlay.classList.remove('hidden');
+            state.overlayVisible = true;
+            clearOverlayTimer();
         } else {
             state.isPlaying = false;
             state.isPaused = false;
@@ -367,6 +372,11 @@ async function pollNowPlaying() {
             trackArtist.textContent = '';
             albumArt.style.display = 'none';
             updateProgressBar(0, 0);
+
+            // Hide overlay when nothing is playing
+            overlay.classList.add('hidden');
+            state.overlayVisible = false;
+            hideQueue();
         }
     } catch (error) {
         console.error('Failed to poll now playing:', error);
@@ -399,6 +409,12 @@ function updateLikeButton() {
 // === Overlay Controls ===
 
 function toggleOverlay() {
+    if (state.isPlaying) {
+        // When playing, tap toggles queue instead of hiding the overlay
+        toggleQueue();
+        return;
+    }
+
     state.overlayVisible = !state.overlayVisible;
 
     if (state.overlayVisible) {
@@ -412,6 +428,10 @@ function toggleOverlay() {
 }
 
 function resetOverlayTimer() {
+    if (state.isPlaying) {
+        return;
+    }
+
     clearOverlayTimer();
     overlayTimer = setTimeout(() => {
         overlay.classList.add('hidden');
