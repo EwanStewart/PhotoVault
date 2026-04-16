@@ -535,6 +535,70 @@ html, body {
     opacity: 1;
 }
 
+/* Bulb panel tab */
+#bulb-tab {
+    position: fixed;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 36px;
+    height: 60px;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(10px);
+    border-radius: 8px 0 0 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    cursor: pointer;
+    z-index: 190;
+    transition: opacity 0.3s ease, background 0.2s;
+    opacity: 0.6;
+}
+
+#bulb-tab:active {
+    background: rgba(0, 0, 0, 0.7);
+}
+
+#bulb-tab.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Brightness control in panel */
+#brightness-control {
+    margin-bottom: 15px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+#brightness-label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+}
+
+#brightness-slider {
+    width: 100%;
+    height: 6px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+    outline: none;
+}
+
+#brightness-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--accent-color);
+    cursor: pointer;
+}
+
 /* Bulb control panel */
 #bulb-panel {
     position: fixed;

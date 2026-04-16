@@ -84,6 +84,8 @@ const bulbCloseBtn = document.getElementById('bulb-close-btn');
 const bulbAllOnBtn = document.getElementById('bulb-all-on-btn');
 const bulbAllOffBtn = document.getElementById('bulb-all-off-btn');
 const colourPalette = document.getElementById('colour-palette');
+const bulbTab = document.getElementById('bulb-tab');
+const brightnessSlider = document.getElementById('brightness-slider');
 
 
 // Preloaded image for next photo
@@ -751,6 +753,8 @@ function openBulbPanel() {
 
     state.bulbPanelVisible = true;
     bulbPanel.classList.add('visible');
+    if (bulbTab) bulbTab.classList.add('hidden');
+    if (brightnessSlider) brightnessSlider.value = state.currentBrightness;
     loadBulbStates();
 }
 
@@ -760,6 +764,7 @@ function closeBulbPanel() {
     state.bulbPanelVisible = false;
     state.selectedBulbId = null;
     bulbPanel.classList.remove('visible');
+    if (bulbTab) bulbTab.classList.remove('hidden');
 
     // Clear colour swatch selection
     const swatches = document.querySelectorAll('.colour-swatch');
@@ -1181,6 +1186,34 @@ if (skipBtn) skipBtn.addEventListener('click', skipTrack);
 if (pauseBtn) pauseBtn.addEventListener('click', togglePlayback);
 if (likeBtn) likeBtn.addEventListener('click', toggleLike);
 if (queueBtn) queueBtn.addEventListener('click', toggleQueue);
+
+// Bulb tab event listener
+if (bulbTab) {
+    bulbTab.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openBulbPanel();
+    });
+
+    bulbTab.addEventListener('touchend', (e) => {
+        e.stopPropagation();
+    });
+}
+
+// Brightness slider event listener
+if (brightnessSlider) {
+    brightnessSlider.addEventListener('input', (e) => {
+        e.stopPropagation();
+        setBrightness(parseInt(e.target.value, 10));
+    });
+
+    brightnessSlider.addEventListener('touchstart', (e) => {
+        e.stopPropagation();
+    });
+
+    brightnessSlider.addEventListener('touchmove', (e) => {
+        e.stopPropagation();
+    });
+}
 
 // Bulb panel event listeners
 if (bulbCloseBtn) {
