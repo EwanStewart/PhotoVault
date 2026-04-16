@@ -1,6 +1,6 @@
 #!/bin/bash
 # Display schedule for photoframe
-# Turns display off at 9pm (21:00) and on at 7am (07:00)
+# Turns display off at 7pm (19:00) and on at 7am (07:00)
 # Add to crontab: * * * * * /home/ewastewa/photoframe/display-schedule.sh
 
 BRIGHTNESS_PATH="/sys/class/backlight/10-0045/brightness"
@@ -39,8 +39,8 @@ if [ -f "$STATE_FILE" ]; then
 fi
 
 # Check time and set display state
-# Off during 21:00-06:59, On during 07:00-20:59
-if [ "$HOUR" -ge 21 ] || [ "$HOUR" -lt 7 ]; then
+# Off during 19:00-06:59, On during 07:00-18:59
+if [ "$HOUR" -ge 19 ] || [ "$HOUR" -lt 7 ]; then
     # Should be off
     if [ "$CURRENT_STATE" != "off" ]; then
         display_off
