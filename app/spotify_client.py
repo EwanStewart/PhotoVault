@@ -20,6 +20,8 @@ class SpotifyClient:
         self._sp_oauth = None
         self._sp = None
         self._current_track_id = None
+        self._cached_is_saved = False
+        self._cached_token_info = None
 
         if self.client_id and self.client_secret:
             self._sp_oauth = SpotifyOAuth(
@@ -35,32 +37,38 @@ class SpotifyClient:
     def _try_load_cached_token(self):
         """Try to load and use cached token."""
         if self._sp_oauth:
-            token_info = self._sp_oauth.get_cached_token()
-            if token_info and 'access_token' in token_info:
-                self._sp = spotipy.Spotify(auth=token_info['access_token'])
+            self._cached_token_info = self._sp_oauth.get_cached_token()
+            if self._cached_token_info and 'access_token' in self._cached_token_info:
+                self._sp = spotipy.Spotify(auth=self._cached_token_info['access_token'])
 
     def _get_valid_client(self):
         """Get a valid Spotify client, refreshing token if needed."""
         if not self._sp_oauth:
             return None
 
-        token_info = self._sp_oauth.get_cached_token()
-        if not token_info or 'access_token' not in token_info:
+        if not self._cached_token_info:
+            self._cached_token_info = self._sp_oauth.get_cached_token()
+
+        if not self._cached_token_info or 'access_token' not in self._cached_token_info:
             return None
 
-        # Refresh token if needed
-        if self._sp_oauth.is_token_expired(token_info):
-            if 'refresh_token' not in token_info:
+        if self._sp_oauth.is_token_expired(self._cached_token_info):
+            if 'refresh_token' not in self._cached_token_info:
                 logger.warning("No refresh token available")
                 return None
             try:
-                token_info = self._sp_oauth.refresh_access_token(token_info['refresh_token'])
+                self._cached_token_info = self._sp_oauth.refresh_access_token(
+                    self._cached_token_info['refresh_token']
+                )
+                self._sp = spotipy.Spotify(auth=self._cached_token_info['access_token'])
             except Exception as e:
                 logger.error(f"Token refresh failed: {e}")
+                self._cached_token_info = None
                 return None
 
-        # Always create fresh client with current token
-        self._sp = spotipy.Spotify(auth=token_info['access_token'])
+        if not self._sp:
+            self._sp = spotipy.Spotify(auth=self._cached_token_info['access_token'])
+
         return self._sp
 
     def is_authenticated(self):
@@ -78,11 +86,11 @@ class SpotifyClient:
         if not self._sp_oauth:
             raise ValueError("Spotify OAuth not configured")
 
-        token_info = self._sp_oauth.get_access_token(code)
-        if not token_info or 'access_token' not in token_info:
+        self._cached_token_info = self._sp_oauth.get_access_token(code)
+        if not self._cached_token_info or 'access_token' not in self._cached_token_info:
             raise ValueError("Failed to get access token")
 
-        self._sp = spotipy.Spotify(auth=token_info['access_token'])
+        self._sp = spotipy.Spotify(auth=self._cached_token_info['access_token'])
 
     def get_now_playing(self):
         """Get currently playing track."""
@@ -102,7 +110,9 @@ class SpotifyClient:
             if not item:
                 return {'playing': False, 'is_playing': is_playing}
 
-            self._current_track_id = item.get('id')
+            new_track_id = item.get('id')
+            track_changed = new_track_id != self._current_track_id
+            self._current_track_id = new_track_id
 
             artists = ', '.join([a['name'] for a in item.get('artists', [])])
             album_art = None
@@ -110,14 +120,13 @@ class SpotifyClient:
             if images:
                 album_art = images[0]['url']
 
-            # Check if track is saved
-            is_saved = False
-            if self._current_track_id:
+            # Only check saved status when the track changes
+            if track_changed and self._current_track_id:
                 try:
                     saved = sp.current_user_saved_tracks_contains([self._current_track_id])
-                    is_saved = saved[0] if saved else False
+                    self._cached_is_saved = saved[0] if saved else False
                 except Exception:
-                    pass
+                    self._cached_is_saved = False
 
             return {
                 'playing': True,
@@ -129,7 +138,7 @@ class SpotifyClient:
                 'progress_ms': current.get('progress_ms', 0),
                 'duration_ms': item.get('duration_ms', 0),
                 'track_id': self._current_track_id,
-                'is_saved': is_saved
+                'is_saved': self._cached_is_saved
             }
         except Exception as e:
             logger.error(f"Spotify error: {e}")
@@ -182,6 +191,7 @@ class SpotifyClient:
 
         try:
             sp.current_user_saved_tracks_add([self._current_track_id])
+            self._cached_is_saved = True
             return True
         except Exception as e:
             logger.error(f"Save track error: {e}")

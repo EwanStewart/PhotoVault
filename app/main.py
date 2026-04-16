@@ -35,6 +35,11 @@ VIDEO_EXTENSIONS = {'.mov'}
 NOMINATIM_LAST_REQUEST_TIME = 0
 NOMINATIM_MIN_INTERVAL = 1.0
 
+# In-memory caches
+_geocode_cache = {}
+_photo_cache = []
+_photo_cache_fileset = set()
+
 # Ensure cache directories exist
 os.makedirs(HEIC_CACHE_DIR, exist_ok=True)
 os.makedirs(FLAG_CACHE_DIR, exist_ok=True)
@@ -180,25 +185,23 @@ def get_display_country(country_code, admin1):
     return display_name
 
 
-def load_geocode_cache():
-    """Load geocode cache from file."""
-    cache = {}
+def load_geocode_cache_from_disk():
+    """Load geocode cache from disk into memory at startup."""
+    global _geocode_cache
 
     try:
         if os.path.exists(GEOCODE_CACHE_FILE):
             with open(GEOCODE_CACHE_FILE, 'r') as f:
-                cache = json.load(f)
+                _geocode_cache = json.load(f)
     except Exception as e:
         logger.warning("Failed to load geocode cache: %s", e)
 
-    return cache
 
-
-def save_geocode_cache(cache):
-    """Save geocode cache to file."""
+def save_geocode_cache_to_disk():
+    """Flush in-memory geocode cache to disk."""
     try:
         with open(GEOCODE_CACHE_FILE, 'w') as f:
-            json.dump(cache, f)
+            json.dump(_geocode_cache, f)
     except Exception as e:
         logger.warning("Failed to save geocode cache: %s", e)
 
@@ -307,23 +310,20 @@ def reverse_geocode(lat, lon):
     @param lon Longitude in decimal degrees
     @returns Dictionary with 'text' and 'country_code' keys or None
     """
+    global _geocode_cache
     result_data = None
 
     # Round coordinates for cache key (4 decimal places ~ 11m precision)
     cache_key = f"{round(lat, 4)},{round(lon, 4)}"
 
-    # Check cache first
-    cache = load_geocode_cache()
-    if cache_key in cache:
-        result_data = cache[cache_key]
+    if cache_key in _geocode_cache:
+        result_data = _geocode_cache[cache_key]
     else:
-        # Try Nominatim API
         result_data = nominatim_reverse_geocode(lat, lon)
 
-        # Cache the result (even if None, to avoid repeated failed lookups)
         if result_data:
-            cache[cache_key] = result_data
-            save_geocode_cache(cache)
+            _geocode_cache[cache_key] = result_data
+            save_geocode_cache_to_disk()
 
     return result_data
 
@@ -343,58 +343,85 @@ def index():
     return render_template('index.html')
 
 
+def build_photo_data(filename):
+    """Build metadata dict for a single photo file."""
+    filepath = os.path.join(PHOTOS_DIR, filename)
+    photo_data = None
+
+    try:
+        stat = os.stat(filepath)
+        photo_data = {
+            'filename': filename,
+            'modified': stat.st_mtime,
+            'size': stat.st_size
+        }
+
+        metadata = get_photo_metadata(filepath)
+        if metadata:
+            if metadata.get('date_taken'):
+                photo_data['date_taken'] = metadata['date_taken']
+
+            if metadata.get('lat') and metadata.get('lon'):
+                photo_data['coords'] = {
+                    'lat': metadata['lat'],
+                    'lon': metadata['lon']
+                }
+                location_data = reverse_geocode(metadata['lat'], metadata['lon'])
+                if location_data:
+                    photo_data['location'] = location_data['text']
+                    if location_data.get('country_code'):
+                        photo_data['country_code'] = location_data['country_code']
+
+        video_filename = find_live_photo_video(filepath)
+        if video_filename:
+            photo_data['isLivePhoto'] = True
+            photo_data['videoFilename'] = video_filename
+
+    except OSError:
+        photo_data = {'filename': filename, 'modified': 0, 'size': 0}
+
+    return photo_data
+
+
+def refresh_photo_cache():
+    """Rebuild photo cache only when the file set changes."""
+    global _photo_cache, _photo_cache_fileset
+
+    if not os.path.exists(PHOTOS_DIR):
+        _photo_cache = []
+        _photo_cache_fileset = set()
+        return
+
+    current_files = set()
+    for f in os.listdir(PHOTOS_DIR):
+        ext = os.path.splitext(f)[1].lower()
+        if ext in ALLOWED_EXTENSIONS:
+            current_files.add(f)
+
+    if current_files == _photo_cache_fileset:
+        return
+
+    added = current_files - _photo_cache_fileset
+    removed = _photo_cache_fileset - current_files
+
+    if removed:
+        _photo_cache = [p for p in _photo_cache if p['filename'] not in removed]
+
+    for filename in added:
+        photo_data = build_photo_data(filename)
+        if photo_data:
+            _photo_cache.append(photo_data)
+
+    _photo_cache.sort(key=lambda x: x['modified'], reverse=True)
+    _photo_cache_fileset = current_files
+
+
 @app.route('/photos')
 def list_photos():
-    """Return list of photo filenames with metadata."""
-    photos = []
+    """Return cached list of photo filenames with metadata."""
+    refresh_photo_cache()
 
-    if os.path.exists(PHOTOS_DIR):
-        for f in os.listdir(PHOTOS_DIR):
-            ext = os.path.splitext(f)[1].lower()
-            if ext in ALLOWED_EXTENSIONS:
-                filepath = os.path.join(PHOTOS_DIR, f)
-                try:
-                    stat = os.stat(filepath)
-                    photo_data = {
-                        'filename': f,
-                        'modified': stat.st_mtime,
-                        'size': stat.st_size
-                    }
-
-                    # Extract metadata (GPS and date)
-                    metadata = get_photo_metadata(filepath)
-                    if metadata:
-                        # Add date taken if available
-                        if metadata.get('date_taken'):
-                            photo_data['date_taken'] = metadata['date_taken']
-
-                        # Add GPS coords and reverse geocode
-                        if metadata.get('lat') and metadata.get('lon'):
-                            photo_data['coords'] = {
-                                'lat': metadata['lat'],
-                                'lon': metadata['lon']
-                            }
-                            # Reverse geocode to get location name
-                            location_data = reverse_geocode(metadata['lat'], metadata['lon'])
-                            if location_data:
-                                photo_data['location'] = location_data['text']
-                                if location_data.get('country_code'):
-                                    photo_data['country_code'] = location_data['country_code']
-
-                    # Check for Live Photo video
-                    video_filename = find_live_photo_video(filepath)
-                    if video_filename:
-                        photo_data['isLivePhoto'] = True
-                        photo_data['videoFilename'] = video_filename
-
-                    photos.append(photo_data)
-                except OSError:
-                    photos.append({'filename': f, 'modified': 0, 'size': 0})
-
-    # Sort by modification time (newest first)
-    photos.sort(key=lambda x: x['modified'], reverse=True)
-
-    return jsonify(photos)
+    return jsonify(_photo_cache)
 
 
 @app.route('/photos/<path:filename>')
@@ -914,5 +941,6 @@ def spotify_callback():
 
 
 if __name__ == '__main__':
+    load_geocode_cache_from_disk()
     logger.info("Starting Photo Frame server")
     app.run(host='0.0.0.0', port=5000, debug=False)

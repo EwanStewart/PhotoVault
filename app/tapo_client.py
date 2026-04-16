@@ -400,19 +400,26 @@ class TapoBulbClient:
         @param power_on True to turn on, False to turn off
         @returns Result dictionary with success count and individual results
         """
-        results = []
-        success_count = 0
+        tasks = [
+            self._set_bulb_power_async(bulb_id, power_on)
+            for bulb_id in self._bulbs
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        for bulb_id in self._bulbs:
-            bulb_result = await self._set_bulb_power_async(bulb_id, power_on)
-            results.append(bulb_result)
-            if bulb_result['success']:
-                success_count += 1
+        resolved = []
+        success_count = 0
+        for r in results:
+            if isinstance(r, Exception):
+                resolved.append({'success': False, 'error': str(r)})
+            else:
+                resolved.append(r)
+                if r['success']:
+                    success_count += 1
 
         return {
             'success_count': success_count,
             'total_count': len(self._bulbs),
-            'results': results
+            'results': resolved
         }
 
     def set_all_power(self, power_on: bool) -> Dict[str, Any]:
@@ -438,21 +445,26 @@ class TapoBulbClient:
         @param brightness Brightness level (0-100)
         @returns Result dictionary with success count and individual results
         """
-        results = []
-        success_count = 0
+        tasks = [
+            self._set_bulb_colour_async(bulb_id, hue, saturation, brightness)
+            for bulb_id in self._bulbs
+        ]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        for bulb_id in self._bulbs:
-            bulb_result = await self._set_bulb_colour_async(
-                bulb_id, hue, saturation, brightness
-            )
-            results.append(bulb_result)
-            if bulb_result['success']:
-                success_count += 1
+        resolved = []
+        success_count = 0
+        for r in results:
+            if isinstance(r, Exception):
+                resolved.append({'success': False, 'error': str(r)})
+            else:
+                resolved.append(r)
+                if r['success']:
+                    success_count += 1
 
         return {
             'success_count': success_count,
             'total_count': len(self._bulbs),
-            'results': results
+            'results': resolved
         }
 
     def set_all_colour(
