@@ -21,7 +21,6 @@ class SpotifyClient:
         self._sp = None
         self._current_track_id = None
         self._cached_is_saved = False
-        self._cached_token_info = None
 
         if self.client_id and self.client_secret:
             self._sp_oauth = SpotifyOAuth(
@@ -32,43 +31,24 @@ class SpotifyClient:
                 cache_path=CACHE_PATH,
                 open_browser=False
             )
-            self._try_load_cached_token()
-
-    def _try_load_cached_token(self):
-        """Try to load and use cached token."""
-        if self._sp_oauth:
-            self._cached_token_info = self._sp_oauth.get_cached_token()
-            if self._cached_token_info and 'access_token' in self._cached_token_info:
-                self._sp = spotipy.Spotify(auth=self._cached_token_info['access_token'])
+            self._sp = spotipy.Spotify(auth_manager=self._sp_oauth)
 
     def _get_valid_client(self):
-        """Get a valid Spotify client, refreshing token if needed."""
-        if not self._sp_oauth:
+        """Return the Spotify client if a cached token exists.
+
+        The client uses auth_manager, so spotipy refreshes the access token
+        transparently on each call. A transient refresh failure no longer
+        leaves a stale client in place.
+        """
+        if not self._sp_oauth or not self._sp:
             return None
-
-        if not self._cached_token_info:
-            self._cached_token_info = self._sp_oauth.get_cached_token()
-
-        if not self._cached_token_info or 'access_token' not in self._cached_token_info:
+        try:
+            token_info = self._sp_oauth.get_cached_token()
+        except Exception as e:
+            logger.error(f"Token cache read failed: {e}")
             return None
-
-        if self._sp_oauth.is_token_expired(self._cached_token_info):
-            if 'refresh_token' not in self._cached_token_info:
-                logger.warning("No refresh token available")
-                return None
-            try:
-                self._cached_token_info = self._sp_oauth.refresh_access_token(
-                    self._cached_token_info['refresh_token']
-                )
-                self._sp = spotipy.Spotify(auth=self._cached_token_info['access_token'])
-            except Exception as e:
-                logger.error(f"Token refresh failed: {e}")
-                self._cached_token_info = None
-                return None
-
-        if not self._sp:
-            self._sp = spotipy.Spotify(auth=self._cached_token_info['access_token'])
-
+        if not token_info or 'access_token' not in token_info:
+            return None
         return self._sp
 
     def is_authenticated(self):
@@ -86,11 +66,11 @@ class SpotifyClient:
         if not self._sp_oauth:
             raise ValueError("Spotify OAuth not configured")
 
-        self._cached_token_info = self._sp_oauth.get_access_token(code)
-        if not self._cached_token_info or 'access_token' not in self._cached_token_info:
+        token_info = self._sp_oauth.get_access_token(code, as_dict=True, check_cache=False)
+        if not token_info or 'access_token' not in token_info:
             raise ValueError("Failed to get access token")
 
-        self._sp = spotipy.Spotify(auth=self._cached_token_info['access_token'])
+        self._sp = spotipy.Spotify(auth_manager=self._sp_oauth)
 
     def get_now_playing(self):
         """Get currently playing track."""
