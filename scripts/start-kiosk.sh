@@ -4,10 +4,11 @@ export DISPLAY=:0
 export XAUTHORITY=/home/ewastewa/.Xauthority
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 # Start Flask app in background
 echo "Starting Flask app"
-"${SCRIPT_DIR}/run.sh" &
+"${REPO_DIR}/run.sh" &
 FLASK_PID=$!
 
 # Wait for Flask to be ready

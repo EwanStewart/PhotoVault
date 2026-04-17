@@ -4,9 +4,10 @@ import logging
 import time
 import urllib.request
 import urllib.error
+from pathlib import Path
 from flask import Flask, render_template, jsonify, send_from_directory, redirect, request, send_file
-from spotify_client import SpotifyClient
-from tapo_client import TapoBulbClient, COLOUR_PRESETS
+from photovault.spotify_client import SpotifyClient
+from photovault.tapo_client import TapoBulbClient, COLOUR_PRESETS
 import pycountry
 from PIL import Image
 from pillow_heif import register_heif_opener
@@ -24,10 +25,12 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
 
-PHOTOS_DIR = os.environ.get('PHOTOS_DIR', '/home/ewastewa/photoframe/photos')
-HEIC_CACHE_DIR = '/tmp/photoframe_heic_cache'
-FLAG_CACHE_DIR = '/tmp/photoframe_flag_cache'
-GEOCODE_CACHE_FILE = '/home/ewastewa/photoframe/geocode_cache.json'
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+PHOTOS_DIR = os.environ.get('PHOTOS_DIR', str(REPO_ROOT / 'photos'))
+HEIC_CACHE_DIR = '/tmp/photovault_heic_cache'
+FLAG_CACHE_DIR = '/tmp/photovault_flag_cache'
+GEOCODE_CACHE_FILE = str(REPO_ROOT / 'geocode_cache.json')
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.heic'}
 VIDEO_EXTENSIONS = {'.mov'}
 
@@ -48,10 +51,10 @@ os.makedirs(FLAG_CACHE_DIR, exist_ok=True)
 BRIGHTNESS_PATH = os.environ.get('BRIGHTNESS_PATH', '/sys/class/backlight/10-0045/brightness')
 DISPLAY_POWER_PATH = os.environ.get('DISPLAY_POWER_PATH', '/sys/class/backlight/10-0045/bl_power')
 MAX_BRIGHTNESS_PATH = os.environ.get('MAX_BRIGHTNESS_PATH', '/sys/class/backlight/10-0045/max_brightness')
-BRIGHTNESS_DESIRED = '/tmp/photoframe_brightness'
+BRIGHTNESS_DESIRED = '/tmp/photovault_brightness'
 
 # Sync status file
-SYNC_STATUS_FILE = '/tmp/photoframe_sync_status'
+SYNC_STATUS_FILE = '/tmp/photovault_sync_status'
 
 
 spotify = SpotifyClient()
@@ -721,7 +724,7 @@ def sync_status():
 @app.route('/api/theme', methods=['GET', 'POST'])
 def theme():
     """Get or set theme preferences."""
-    theme_file = '/tmp/photoframe_theme'
+    theme_file = '/tmp/photovault_theme'
 
     if request.method == 'GET':
         try:

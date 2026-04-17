@@ -18,5 +18,5 @@ source "${VENV_DIR}/bin/activate"
 
 export PHOTOS_DIR="${SCRIPT_DIR}/photos"
 
-cd "${SCRIPT_DIR}/app"
-python main.py
+cd "${SCRIPT_DIR}/src"
+python -m photovault.main

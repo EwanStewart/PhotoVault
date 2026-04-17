@@ -1,10 +1,10 @@
 [Unit]
-Description=Photoframe Brightness Helper
+Description=PhotoVault Brightness Helper
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=/home/ewastewa/photoframe/brightness-helper.sh
+ExecStart=/home/ewastewa/photovault/scripts/brightness-helper.sh
 Restart=always
 RestartSec=5
 User=root

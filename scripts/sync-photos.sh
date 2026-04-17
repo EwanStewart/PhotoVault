@@ -2,9 +2,12 @@
 # Sync photos from Google Drive
 # Run manually or via cron
 
-PHOTOS_DIR="${PHOTOS_DIR:-/home/ewastewa/photoframe/photos}"
-SYNC_STATUS_FILE="/tmp/photoframe_sync_status"
-LOG_FILE="/tmp/photoframe_sync.log"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+PHOTOS_DIR="${PHOTOS_DIR:-${REPO_DIR}/photos}"
+SYNC_STATUS_FILE="/tmp/photovault_sync_status"
+LOG_FILE="/tmp/photovault_sync.log"
 
 log() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE"

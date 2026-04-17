@@ -1,0 +1,17 @@
+[Unit]
+Description=PhotoVault Kiosk
+After=graphical.target
+Wants=graphical.target
+
+[Service]
+Type=simple
+User=ewastewa
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/ewastewa/.Xauthority
+ExecStart=/home/ewastewa/photovault/scripts/start-kiosk.sh
+Restart=always
+RestartSec=5
+KillMode=process
+
+[Install]
+WantedBy=graphical.target

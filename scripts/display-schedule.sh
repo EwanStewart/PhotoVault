@@ -1,12 +1,12 @@
 #!/bin/bash
-# Display schedule for photoframe
+# Display schedule for PhotoVault
 # Turns display off at 7pm (19:00) and on at 7am (07:00)
-# Add to crontab: * * * * * /home/ewastewa/photoframe/display-schedule.sh
+# Add to crontab: * * * * * /home/ewastewa/photovault/scripts/display-schedule.sh
 
 BRIGHTNESS_PATH="/sys/class/backlight/10-0045/brightness"
 DISPLAY_POWER_PATH="/sys/class/backlight/10-0045/bl_power"
-STATE_FILE="/tmp/photoframe_display_state"
-SAVED_BRIGHTNESS_FILE="/tmp/photoframe_saved_brightness"
+STATE_FILE="/tmp/photovault_display_state"
+SAVED_BRIGHTNESS_FILE="/tmp/photovault_saved_brightness"
 
 HOUR=$(date +%H)
 

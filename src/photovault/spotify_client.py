@@ -1,12 +1,14 @@
 import os
 import logging
+from pathlib import Path
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 
 logger = logging.getLogger(__name__)
 
 SCOPE = 'user-read-playback-state user-modify-playback-state user-read-currently-playing user-library-modify user-library-read'
-CACHE_PATH = os.environ.get('SPOTIFY_CACHE', '/home/ewastewa/photoframe/.cache/spotify_token')
+REPO_ROOT = Path(__file__).resolve().parents[2]
+CACHE_PATH = os.environ.get('SPOTIFY_CACHE', str(REPO_ROOT / '.cache' / 'spotify_token'))
 
 
 class SpotifyClient:

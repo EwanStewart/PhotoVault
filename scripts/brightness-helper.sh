@@ -1,11 +1,11 @@
 #!/bin/bash
-# Brightness helper - runs on host to apply brightness changes from container
-# The container writes desired brightness to a file, this script applies it
-# Run with: nohup /home/ewastewa/photoframe/brightness-helper.sh &
+# Brightness helper - applies brightness changes requested by the Flask app.
+# The app writes the desired value to DESIRED_FILE; this daemon polls it
+# and writes to sysfs. Runs as root via photovault-brightness.service.
 
 BRIGHTNESS_PATH="${BRIGHTNESS_PATH:-/sys/class/backlight/10-0045/brightness}"
-DESIRED_FILE="/tmp/photoframe_brightness"
-LOG_FILE="/tmp/photoframe_brightness.log"
+DESIRED_FILE="/tmp/photovault_brightness"
+LOG_FILE="/tmp/photovault_brightness.log"
 LAST_APPLIED=""
 
 log() {
