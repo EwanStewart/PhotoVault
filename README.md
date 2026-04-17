@@ -2,7 +2,7 @@
 
 PhotoVault turns a Raspberry Pi 3B+ with a 7" DSI touchscreen into a photo frame that also shows what's playing on Spotify. It runs as a Flask app in Chromium kiosk mode. It can control TP-Link Tapo smart bulbs on the same network.
 
-![PhotoVault kiosk showing an Angus hillside with the Spotify overlay](docs/screenshot.png)
+![PhotoVault kiosk with the Spotify overlay and the Tapo bulb panel open](docs/screenshot.png)
 
 ## What it does
 
