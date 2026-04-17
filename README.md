@@ -2,6 +2,8 @@
 
 A Raspberry Pi photo frame with Spotify "Now Playing" overlay and Tapo smart bulb control. Runs as a Flask app on a Pi 3B+ with a 7" DSI touchscreen in Chromium kiosk mode.
 
+![PhotoVault kiosk showing an Angus hillside with the Spotify overlay](docs/screenshot.png)
+
 ## Features
 
 - Fullscreen slideshow of photos synced from Google Drive via rclone
