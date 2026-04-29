@@ -437,9 +437,8 @@ def serve_photo(filename):
     filepath = os.path.join(PHOTOS_DIR, filename)
     ext = os.path.splitext(filename)[1].lower()
 
-    # Convert HEIC to JPEG for browser compatibility
     if ext == '.heic':
-        # Check cache first
+        os.makedirs(HEIC_CACHE_DIR, exist_ok=True)
         cache_filename = os.path.splitext(filename)[0] + '.jpg'
         cache_path = os.path.join(HEIC_CACHE_DIR, cache_filename)
 
@@ -484,13 +483,12 @@ def serve_flag(country_code):
     if not re.match(r'^[a-z]{2}(-[a-z]{3})?$', country_code):
         return jsonify({'error': 'Invalid country code'}), 400
 
+    os.makedirs(FLAG_CACHE_DIR, exist_ok=True)
     cache_path = os.path.join(FLAG_CACHE_DIR, f"{country_code}.svg")
 
-    # Check cache first
     if os.path.exists(cache_path):
         return send_file(cache_path, mimetype='image/svg+xml')
 
-    # Fetch from FlagCDN
     flag_url = f"https://flagcdn.com/{country_code}.svg"
     try:
         request_obj = urllib.request.Request(
@@ -500,7 +498,6 @@ def serve_flag(country_code):
         with urllib.request.urlopen(request_obj, timeout=10) as response:
             svg_data = response.read()
 
-        # Cache locally
         with open(cache_path, 'wb') as f:
             f.write(svg_data)
 
