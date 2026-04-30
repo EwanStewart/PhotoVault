@@ -373,10 +373,6 @@ html, body {
     left: 20px;
 }
 
-.gesture-indicator.right {
-    right: 20px;
-}
-
 .gesture-indicator.visible {
     opacity: 1;
 }
@@ -395,10 +391,6 @@ html, body {
 
 .gesture-indicator.left .indicator-fill {
     background: linear-gradient(to top, #FF9800, #FFC107);
-}
-
-.gesture-indicator.right .indicator-fill {
-    background: linear-gradient(to top, #2196F3, #03A9F4);
 }
 
 .indicator-icon {

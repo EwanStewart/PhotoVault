@@ -4,13 +4,10 @@ const POLL_INTERVAL = 5000;   // Poll Spotify every 5 seconds
 const OVERLAY_TIMEOUT = 10000; // Hide overlay after 10 seconds
 const SKIP_DEBOUNCE = 1000;   // Debounce skip button
 const DOUBLE_TAP_DELAY = 300;
-const SWIPE_THRESHOLD = 30;
-const HORIZONTAL_SWIPE_THRESHOLD = 50;  // Threshold to determine swipe direction
 const PHOTO_SKIP_THRESHOLD = 80;        // Horizontal swipe distance to skip photo
 
 // Gesture zone percentages
 const LEFT_ZONE_PERCENT = 0.125;   // Left 12.5% for brightness
-const RIGHT_ZONE_PERCENT = 0.125;  // Right 12.5% for volume
 
 // State management
 const state = {
@@ -21,7 +18,6 @@ const state = {
     isPlaying: false,
     isPaused: false,
     currentBrightness: 128,
-    currentVolume: 50,
     displayOn: true,
     currentTrackId: null,
     isTrackSaved: false,
@@ -49,7 +45,6 @@ let touchStartY = 0;
 let touchStartTime = 0;
 let activeGesture = null;
 let gestureStartValue = 0;
-let gestureDirectionDetermined = false;
 
 // DOM elements
 const photoCurrent = document.getElementById('photo-current');
@@ -70,7 +65,6 @@ const queuePanel = document.getElementById('queue-panel');
 const queueList = document.getElementById('queue-list');
 const authPrompt = document.getElementById('auth-prompt');
 const brightnessIndicator = document.getElementById('brightness-indicator');
-const volumeIndicator = document.getElementById('volume-indicator');
 const syncStatus = document.getElementById('sync-status');
 const locationBadge = document.getElementById('location-badge');
 const locationText = document.getElementById('location-text');
@@ -583,18 +577,15 @@ function escapeHtml(text) {
 
 async function loadHardwareState() {
     try {
-        const [brightnessRes, volumeRes, displayRes] = await Promise.all([
+        const [brightnessRes, displayRes] = await Promise.all([
             fetch('/api/brightness'),
-            fetch('/api/volume'),
             fetch('/api/display')
         ]);
 
         const brightnessData = await brightnessRes.json();
-        const volumeData = await volumeRes.json();
         const displayData = await displayRes.json();
 
         if (brightnessData.level !== undefined) state.currentBrightness = brightnessData.level;
-        if (volumeData.level !== undefined) state.currentVolume = volumeData.level;
         if (displayData.state !== undefined) state.displayOn = displayData.state === 'on';
     } catch (error) {
         console.error('Failed to load hardware state:', error);
@@ -614,22 +605,6 @@ async function setBrightness(level) {
         });
     } catch (error) {
         console.error('Failed to set brightness:', error);
-    }
-}
-
-async function setVolume(level) {
-    level = Math.max(0, Math.min(100, Math.round(level)));
-    state.currentVolume = level;
-    updateIndicator(volumeIndicator, level);
-
-    try {
-        await fetch('/api/volume', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ level })
-        });
-    } catch (error) {
-        console.error('Failed to set volume:', error);
     }
 }
 
@@ -1098,10 +1073,8 @@ async function reconnectBulb(bulbId) {
 function getGestureZone(x) {
     const screenWidth = window.innerWidth;
     const leftBoundary = screenWidth * LEFT_ZONE_PERCENT;
-    const rightBoundary = screenWidth * (1 - RIGHT_ZONE_PERCENT);
 
     if (x <= leftBoundary) return 'brightness';
-    if (x >= rightBoundary) return 'volume';
     return 'center';
 }
 
@@ -1110,7 +1083,6 @@ function handleTouchStart(e) {
     touchStartX = touch.clientX;
     touchStartY = touch.clientY;
     touchStartTime = Date.now();
-    gestureDirectionDetermined = false;
 
     const zone = getGestureZone(touchStartX);
 
@@ -1118,11 +1090,6 @@ function handleTouchStart(e) {
         activeGesture = 'brightness';
         gestureStartValue = state.currentBrightness;
         showIndicator(brightnessIndicator, state.currentBrightness / 255 * 100);
-    } else if (zone === 'volume') {
-        // For right edge, we need to determine direction first
-        // Start as potential volume gesture, may switch to panel swipe
-        activeGesture = 'volume_or_panel';
-        gestureStartValue = state.currentVolume;
     } else {
         activeGesture = 'center_tap';
         // Start Live Photo long-press detection in center zone
@@ -1158,27 +1125,6 @@ function handleTouchMove(e) {
         return;
     }
 
-    // For right edge, determine gesture direction after threshold
-    if (activeGesture === 'volume_or_panel' && !gestureDirectionDetermined) {
-        const absX = Math.abs(deltaX);
-        const absY = Math.abs(deltaY);
-
-        if (absX >= HORIZONTAL_SWIPE_THRESHOLD || absY >= HORIZONTAL_SWIPE_THRESHOLD) {
-            gestureDirectionDetermined = true;
-
-            if (absX > absY && deltaX > 0) {
-                // Horizontal swipe left from right edge - open bulb panel
-                activeGesture = 'panel_swipe';
-                openBulbPanel();
-            } else {
-                // Vertical swipe - volume control
-                activeGesture = 'volume';
-                showIndicator(volumeIndicator, state.currentVolume);
-            }
-        }
-        return;
-    }
-
     // Calculate change: 200px swipe = full range
     const sensitivity = 200;
 
@@ -1186,10 +1132,6 @@ function handleTouchMove(e) {
         const change = (deltaY / sensitivity) * 255;
         const newValue = gestureStartValue + change;
         setBrightness(newValue);
-    } else if (activeGesture === 'volume') {
-        const change = (deltaY / sensitivity) * 100;
-        const newValue = gestureStartValue + change;
-        setVolume(newValue);
     }
 }
 
@@ -1212,7 +1154,6 @@ function handleTouchEnd(e) {
             }
         }
         activeGesture = null;
-        gestureDirectionDetermined = false;
         return;
     }
 
@@ -1239,15 +1180,9 @@ function handleTouchEnd(e) {
     // Hide indicators
     if (activeGesture === 'brightness') {
         hideIndicator(brightnessIndicator);
-    } else if (activeGesture === 'volume') {
-        hideIndicator(volumeIndicator);
-    } else if (activeGesture === 'volume_or_panel' && !gestureDirectionDetermined) {
-        // Quick tap in right zone without direction determined
-        hideIndicator(volumeIndicator);
     }
 
     activeGesture = null;
-    gestureDirectionDetermined = false;
 }
 
 // === Event Listeners ===
