@@ -229,42 +229,45 @@ html, body {
 #queue-panel {
     position: absolute;
     bottom: 100%;
-    left: 0;
-    right: 0;
+    left: 50%;
+    transform: translateX(-50%) translateY(10px);
+    width: 360px;
+    max-width: calc(100vw - 40px);
     margin-bottom: 10px;
-    background: rgba(0, 0, 0, var(--overlay-opacity));
-    backdrop-filter: blur(10px);
+    background: rgba(15, 15, 15, 0.95);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 12px;
-    padding: 10px;
-    max-height: 200px;
+    padding: 12px 14px;
+    max-height: 280px;
     overflow-y: auto;
     opacity: 0;
-    transform: translateY(10px);
     pointer-events: none;
     transition: opacity 0.3s ease, transform 0.3s ease;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
 #queue-panel.visible {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateX(-50%) translateY(0);
     pointer-events: auto;
 }
 
 #queue-header {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
     color: var(--text-secondary);
-    margin-bottom: 8px;
+    margin-bottom: 10px;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.6px;
 }
 
 .queue-item {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 6px 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .queue-item:last-child {
@@ -272,9 +275,9 @@ html, body {
 }
 
 .queue-art {
-    width: 32px;
-    height: 32px;
-    border-radius: 4px;
+    width: 40px;
+    height: 40px;
+    border-radius: 5px;
     object-fit: cover;
     flex-shrink: 0;
 }
@@ -286,26 +289,28 @@ html, body {
 }
 
 .queue-name {
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 500;
+    color: var(--text-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
 .queue-artist {
-    font-size: 10px;
+    font-size: 12px;
     color: var(--text-secondary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    margin-top: 2px;
 }
 
 .queue-empty {
     color: var(--text-secondary);
-    font-size: 12px;
+    font-size: 13px;
     text-align: center;
-    padding: 10px;
+    padding: 12px;
 }
 
 /* Auth prompt */
