@@ -134,8 +134,8 @@ html, body {
     padding: 10px 15px;
     border-radius: 12px;
     color: var(--text-primary);
-    min-width: 320px;
-    max-width: 90vw;
+    width: 360px;
+    max-width: calc(100vw - 40px);
 }
 
 #album-art {
