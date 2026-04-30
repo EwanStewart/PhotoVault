@@ -1,6 +1,8 @@
 import os
 import json
 import logging
+import re
+import threading
 import time
 import urllib.request
 import urllib.error
@@ -23,14 +25,36 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-app.secret_key = os.urandom(24)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
+SECRET_KEY_FILE = str(REPO_ROOT / '.secret_key')
+
+
+def _load_or_create_secret_key():
+    try:
+        if os.path.exists(SECRET_KEY_FILE):
+            with open(SECRET_KEY_FILE, 'rb') as f:
+                key = f.read()
+            if key:
+                return key
+        key = os.urandom(32)
+        with open(SECRET_KEY_FILE, 'wb') as f:
+            f.write(key)
+        os.chmod(SECRET_KEY_FILE, 0o600)
+        return key
+    except OSError:
+        return os.urandom(32)
+
+
+app.secret_key = _load_or_create_secret_key()
+
 PHOTOS_DIR = os.environ.get('PHOTOS_DIR', str(REPO_ROOT / 'photos'))
 HEIC_CACHE_DIR = '/tmp/photovault_heic_cache'
+HEIC_MAX_DIMENSION = 1600
 FLAG_CACHE_DIR = '/tmp/photovault_flag_cache'
 GEOCODE_CACHE_FILE = str(REPO_ROOT / 'geocode_cache.json')
+GEOCODE_SAVE_DEBOUNCE_SECONDS = 5.0
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.heic'}
 VIDEO_EXTENSIONS = {'.mov'}
 
@@ -40,8 +64,15 @@ NOMINATIM_MIN_INTERVAL = 1.0
 
 # In-memory caches
 _geocode_cache = {}
+_geocode_save_timer = None
+_geocode_save_lock = threading.Lock()
 _photo_cache = []
 _photo_cache_fileset = set()
+_photo_cache_lock = threading.Lock()
+_photo_enrich_thread = None
+_heic_locks = {}
+_heic_locks_lock = threading.Lock()
+BIND_HOST = os.environ.get('PHOTOVAULT_BIND_HOST', '127.0.0.1')
 
 # Ensure cache directories exist
 os.makedirs(HEIC_CACHE_DIR, exist_ok=True)
@@ -201,12 +232,26 @@ def load_geocode_cache_from_disk():
 
 
 def save_geocode_cache_to_disk():
-    """Flush in-memory geocode cache to disk."""
+    """Flush in-memory geocode cache to disk via atomic rename."""
     try:
-        with open(GEOCODE_CACHE_FILE, 'w') as f:
+        tmp_path = GEOCODE_CACHE_FILE + '.tmp'
+        with open(tmp_path, 'w') as f:
             json.dump(_geocode_cache, f)
+        os.replace(tmp_path, GEOCODE_CACHE_FILE)
     except Exception as e:
         logger.warning("Failed to save geocode cache: %s", e)
+
+
+def schedule_geocode_save():
+    """Debounce geocode cache flushes to reduce SD-card writes."""
+    global _geocode_save_timer
+    with _geocode_save_lock:
+        if _geocode_save_timer is not None:
+            _geocode_save_timer.cancel()
+        timer = threading.Timer(GEOCODE_SAVE_DEBOUNCE_SECONDS, save_geocode_cache_to_disk)
+        timer.daemon = True
+        _geocode_save_timer = timer
+        timer.start()
 
 
 def get_uk_nation_from_state(state_name):
@@ -326,7 +371,7 @@ def reverse_geocode(lat, lon):
 
         if result_data:
             _geocode_cache[cache_key] = result_data
-            save_geocode_cache_to_disk()
+            schedule_geocode_save()
 
     return result_data
 
@@ -386,37 +431,86 @@ def build_photo_data(filename):
     return photo_data
 
 
+def _build_photo_stub(filename):
+    """Cheap metadata for a new photo: stat only, no EXIF or geocode."""
+    filepath = os.path.join(PHOTOS_DIR, filename)
+    try:
+        stat = os.stat(filepath)
+        return {
+            'filename': filename,
+            'modified': stat.st_mtime,
+            'size': stat.st_size,
+            '_enriched': False,
+        }
+    except OSError:
+        return {'filename': filename, 'modified': 0, 'size': 0, '_enriched': False}
+
+
+def _enrich_pending_photos():
+    """Background pass: fill EXIF/geocode/live-photo data on stubs."""
+    while True:
+        with _photo_cache_lock:
+            target = next((p for p in _photo_cache if not p.get('_enriched')), None)
+        if target is None:
+            return
+
+        enriched = build_photo_data(target['filename'])
+        with _photo_cache_lock:
+            for i, photo in enumerate(_photo_cache):
+                if photo['filename'] == target['filename']:
+                    if enriched:
+                        enriched['_enriched'] = True
+                        _photo_cache[i] = enriched
+                    else:
+                        photo['_enriched'] = True
+                    break
+
+
+def _start_enrich_thread_if_idle():
+    global _photo_enrich_thread
+    if _photo_enrich_thread is not None and _photo_enrich_thread.is_alive():
+        return
+    thread = threading.Thread(target=_enrich_pending_photos, daemon=True)
+    _photo_enrich_thread = thread
+    thread.start()
+
+
 def refresh_photo_cache():
-    """Rebuild photo cache only when the file set changes."""
+    """Sync the photo cache file set; metadata enrichment runs in the background."""
     global _photo_cache, _photo_cache_fileset
 
     if not os.path.exists(PHOTOS_DIR):
-        _photo_cache = []
-        _photo_cache_fileset = set()
+        with _photo_cache_lock:
+            _photo_cache = []
+            _photo_cache_fileset = set()
         return
 
     current_files = set()
-    for f in os.listdir(PHOTOS_DIR):
-        ext = os.path.splitext(f)[1].lower()
-        if ext in ALLOWED_EXTENSIONS:
-            current_files.add(f)
+    with os.scandir(PHOTOS_DIR) as it:
+        for entry in it:
+            if not entry.is_file():
+                continue
+            ext = os.path.splitext(entry.name)[1].lower()
+            if ext in ALLOWED_EXTENSIONS:
+                current_files.add(entry.name)
 
-    if current_files == _photo_cache_fileset:
-        return
+    with _photo_cache_lock:
+        if current_files == _photo_cache_fileset:
+            return
 
-    added = current_files - _photo_cache_fileset
-    removed = _photo_cache_fileset - current_files
+        added = current_files - _photo_cache_fileset
+        removed = _photo_cache_fileset - current_files
 
-    if removed:
-        _photo_cache = [p for p in _photo_cache if p['filename'] not in removed]
+        if removed:
+            _photo_cache = [p for p in _photo_cache if p['filename'] not in removed]
 
-    for filename in added:
-        photo_data = build_photo_data(filename)
-        if photo_data:
-            _photo_cache.append(photo_data)
+        for filename in added:
+            _photo_cache.append(_build_photo_stub(filename))
 
-    _photo_cache.sort(key=lambda x: x['modified'], reverse=True)
-    _photo_cache_fileset = current_files
+        _photo_cache.sort(key=lambda x: x['modified'], reverse=True)
+        _photo_cache_fileset = current_files
+
+    _start_enrich_thread_if_idle()
 
 
 @app.route('/photos')
@@ -424,7 +518,34 @@ def list_photos():
     """Return cached list of photo filenames with metadata."""
     refresh_photo_cache()
 
-    return jsonify(_photo_cache)
+    with _photo_cache_lock:
+        snapshot = [{k: v for k, v in p.items() if k != '_enriched'} for p in _photo_cache]
+    return jsonify(snapshot)
+
+
+def _get_heic_lock(filename):
+    with _heic_locks_lock:
+        lock = _heic_locks.get(filename)
+        if lock is None:
+            lock = threading.Lock()
+            _heic_locks[filename] = lock
+        return lock
+
+
+def _heic_cache_stale(cache_path, source_path):
+    if not os.path.exists(cache_path):
+        return True
+    return os.path.getmtime(source_path) > os.path.getmtime(cache_path)
+
+
+def _convert_heic(source_path, cache_path):
+    with Image.open(source_path) as img:
+        if img.mode in ('RGBA', 'P'):
+            img = img.convert('RGB')
+        img.thumbnail((HEIC_MAX_DIMENSION, HEIC_MAX_DIMENSION), Image.Resampling.LANCZOS)
+        tmp_path = cache_path + '.tmp'
+        img.save(tmp_path, 'JPEG', quality=85, optimize=True)
+    os.replace(tmp_path, cache_path)
 
 
 @app.route('/photos/<path:filename>')
@@ -438,21 +559,18 @@ def serve_photo(filename):
     ext = os.path.splitext(filename)[1].lower()
 
     if ext == '.heic':
-        os.makedirs(HEIC_CACHE_DIR, exist_ok=True)
         cache_filename = os.path.splitext(filename)[0] + '.jpg'
         cache_path = os.path.join(HEIC_CACHE_DIR, cache_filename)
 
-        if not os.path.exists(cache_path) or os.path.getmtime(filepath) > os.path.getmtime(cache_path):
-            try:
-                with Image.open(filepath) as img:
-                    # Convert to RGB (HEIC may have alpha)
-                    if img.mode in ('RGBA', 'P'):
-                        img = img.convert('RGB')
-                    img.save(cache_path, 'JPEG', quality=90)
-                logger.info(f"Converted HEIC to JPEG: {filename}")
-            except Exception as e:
-                logger.error(f"Failed to convert HEIC {filename}: {e}")
-                return jsonify({'error': 'Failed to convert image'}), 500
+        if _heic_cache_stale(cache_path, filepath):
+            with _get_heic_lock(filename):
+                if _heic_cache_stale(cache_path, filepath):
+                    try:
+                        _convert_heic(filepath, cache_path)
+                        logger.info("Converted HEIC to JPEG: %s", filename)
+                    except Exception as e:
+                        logger.error("Failed to convert HEIC %s: %s", filename, e)
+                        return jsonify({'error': 'Failed to convert image'}), 500
 
         return send_file(cache_path, mimetype='image/jpeg')
 
@@ -477,13 +595,9 @@ def serve_video(filename):
 @app.route('/flags/<country_code>.svg')
 def serve_flag(country_code):
     """Serve country flag SVG with local caching."""
-    import re
-
-    # Validate country code (2 lowercase letters only)
     if not re.match(r'^[a-z]{2}(-[a-z]{3})?$', country_code):
         return jsonify({'error': 'Invalid country code'}), 400
 
-    os.makedirs(FLAG_CACHE_DIR, exist_ok=True)
     cache_path = os.path.join(FLAG_CACHE_DIR, f"{country_code}.svg")
 
     if os.path.exists(cache_path):
@@ -985,7 +1099,14 @@ def spotify_callback():
     return redirect('/')
 
 
+def _warm_caches_on_startup():
+    """Pre-build photo cache and connect bulbs without blocking startup."""
+    threading.Thread(target=refresh_photo_cache, daemon=True).start()
+    tapo.start_background_connect()
+
+
 if __name__ == '__main__':
     load_geocode_cache_from_disk()
-    logger.info("Starting Photo Frame server")
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    _warm_caches_on_startup()
+    logger.info("Starting Photo Frame server on %s:5000", BIND_HOST)
+    app.run(host=BIND_HOST, port=5000, debug=False)

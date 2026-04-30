@@ -9,6 +9,7 @@ backoff, and bulk operations.
 import os
 import asyncio
 import logging
+import threading
 from typing import Dict, List, Optional, Any
 
 from kasa import Discover, Credentials
@@ -215,14 +216,30 @@ class TapoBulbClient:
         logger.info("TapoBulbClient initialised with %d bulbs", len(self._bulbs))
 
     _loop = None
+    _loop_lock = threading.Lock()
+    _async_timeout_seconds = 5
+
     def _run_async(self, coroutine):
         if TapoBulbClient._loop is None:
-            import threading
-            TapoBulbClient._loop = asyncio.new_event_loop()
-            thread = threading.Thread(target=TapoBulbClient._loop.run_forever, daemon=True)
-            thread.start()
+            with TapoBulbClient._loop_lock:
+                if TapoBulbClient._loop is None:
+                    loop = asyncio.new_event_loop()
+                    thread = threading.Thread(target=loop.run_forever, daemon=True)
+                    thread.start()
+                    TapoBulbClient._loop = loop
         future = asyncio.run_coroutine_threadsafe(coroutine, TapoBulbClient._loop)
-        return future.result(timeout=15)
+        return future.result(timeout=self._async_timeout_seconds)
+
+    def start_background_connect(self):
+        """Trigger connect_all in a daemon thread; safe to call from app startup."""
+        thread = threading.Thread(target=self._safe_connect_all, daemon=True)
+        thread.start()
+
+    def _safe_connect_all(self):
+        try:
+            self.connect_all()
+        except Exception as error:
+            logger.warning("Background bulb connect failed: %s", error)
 
     async def _connect_all_async(self) -> Dict[str, bool]:
         results = {}
@@ -253,9 +270,12 @@ class TapoBulbClient:
 
         @returns List of bulb state dictionaries
         """
-        # Connect if not initialised
         if not self._initialised:
-            self.connect_all()
+            try:
+                self.connect_all()
+            except Exception as error:
+                logger.warning("connect_all timed out during state fetch: %s", error)
+                self._initialised = True
 
         return self._run_async(self._get_all_bulb_states_async())
 

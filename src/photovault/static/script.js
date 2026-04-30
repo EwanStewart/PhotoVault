@@ -35,7 +35,7 @@ const state = {
 // Timers
 let overlayTimer = null;
 let slideshowInterval = null;
-let indicatorTimers = new Map();
+let brightnessHideTimer = null;
 let lastSkipTime = 0;
 let lastTapTime = 0;
 
@@ -152,8 +152,18 @@ function preloadNextPhoto() {
     const nextPhoto = state.photos[nextIndex];
     const filename = typeof nextPhoto === 'string' ? nextPhoto : nextPhoto.filename;
 
-    preloadedImage = new Image();
-    preloadedImage.src = `/photos/${encodeURIComponent(filename)}`;
+    if (preloadedImage && preloadedImage.filename === filename) {
+        return;
+    }
+
+    if (preloadedImage && preloadedImage.image) {
+        preloadedImage.image.src = '';
+    }
+
+    const image = new Image();
+    image.decoding = 'async';
+    image.src = `/photos/${encodeURIComponent(filename)}`;
+    preloadedImage = { image, filename };
 }
 
 // Live Photo tracking
@@ -162,26 +172,47 @@ let isLiveVideoPlaying = false;
 
 // === Photo Management ===
 
+function photoFilenames(photos) {
+    return photos.map(p => typeof p === 'string' ? p : p.filename);
+}
+
+function sameFilenameSet(a, b) {
+    if (a.length !== b.length) return false;
+    const set = new Set(a);
+    return b.every(name => set.has(name));
+}
+
 async function loadPhotos() {
+    const initial = state.photos.length === 0;
+
     try {
-        showPhotoLoading(true);
+        if (initial) showPhotoLoading(true);
         const response = await fetch('/photos');
         const data = await response.json();
 
-        // Keep full photo objects with metadata
+        const incomingNames = photoFilenames(data);
+        const currentNames = photoFilenames(state.photos);
+
+        if (!initial && sameFilenameSet(incomingNames, currentNames)) {
+            return;
+        }
+
         state.photos = shuffleArray(data);
 
-        if (state.photos.length > 0) {
+        if (state.photos.length === 0) {
+            showPhotoError('No photos found. Add photos to Google Drive.');
+            return;
+        }
+
+        if (initial) {
             showPhoto(0);
             startSlideshow();
-        } else {
-            showPhotoError('No photos found. Add photos to Google Drive.');
         }
     } catch (error) {
         console.error('Failed to load photos:', error);
-        showPhotoError('Failed to load photos');
+        if (initial) showPhotoError('Failed to load photos');
     } finally {
-        showPhotoLoading(false);
+        if (initial) showPhotoLoading(false);
     }
 }
 
@@ -219,39 +250,41 @@ function showPhoto(index) {
     showPhotoLoading(true);
     hidePhotoError();
 
-    // Check if this image was preloaded
     let img;
-    if (preloadedImage && preloadedImage.src.endsWith(encodeURIComponent(filename))) {
-        img = preloadedImage;
+    if (preloadedImage && preloadedImage.filename === filename) {
+        img = preloadedImage.image;
         preloadedImage = null;
     } else {
         img = new Image();
+        img.decoding = 'async';
         img.src = photoUrl;
     }
 
-    img.onload = () => {
+    let handled = false;
+
+    const onLoad = () => {
+        if (handled) return;
+        handled = true;
         nextImg.src = img.src;
         nextImg.classList.add('active');
         currentImg.classList.remove('active');
         showPhotoLoading(false);
 
-        // Update blurred background
         if (photoBg) {
             photoBg.style.backgroundImage = `url('${img.src}')`;
         }
 
-        // Update current photo and display info
         state.currentPhoto = photo;
         updatePhotoInfo(photo);
 
-        // Preload next photo
         preloadNextPhoto();
     };
 
-    img.onerror = () => {
+    const onError = () => {
+        if (handled) return;
+        handled = true;
         console.error('Failed to load photo:', filename);
         showPhotoLoading(false);
-        // Try next photo
         state.currentIndex = (state.currentIndex + 1) % state.photos.length;
         if (state.photos.length > 1) {
             setTimeout(() => showPhoto(state.currentIndex), 100);
@@ -260,10 +293,13 @@ function showPhoto(index) {
         }
     };
 
-    // If we created a new image (not preloaded), we already set the src above
-    // For preloaded images, if already loaded, onload may not fire, so check
     if (img.complete && img.naturalWidth > 0) {
-        img.onload();
+        onLoad();
+    } else if (img.complete) {
+        onError();
+    } else {
+        img.onload = onLoad;
+        img.onerror = onError;
     }
 }
 function updatePhotoInfo(photo) {
@@ -684,16 +720,11 @@ function showIndicator(indicator, percent) {
 function hideIndicator(indicator) {
     if (!indicator) return;
 
-    // Clear existing timer for this indicator
-    const existingTimer = indicatorTimers.get(indicator);
-    if (existingTimer) clearTimeout(existingTimer);
-
-    const timer = setTimeout(() => {
+    if (brightnessHideTimer) clearTimeout(brightnessHideTimer);
+    brightnessHideTimer = setTimeout(() => {
         indicator.classList.remove('visible');
-        indicatorTimers.delete(indicator);
+        brightnessHideTimer = null;
     }, 1000);
-
-    indicatorTimers.set(indicator, timer);
 }
 
 // === Live Photo Playback ===
@@ -914,13 +945,30 @@ function selectBulbForColour(bulbId) {
     });
 }
 
-async function toggleBulb(bulbId, powerOn) {
-    // Optimistic update
-    const bulb = state.bulbs.find(b => b.id === bulbId);
-    if (bulb) {
-        bulb.is_on = powerOn;
-        renderBulbList();
+function patchBulbCard(bulb) {
+    const card = bulbList && bulbList.querySelector(`.bulb-card[data-bulb-id="${bulb.id}"]`);
+    if (!card) return;
+
+    const statusText = bulb.connected ? (bulb.is_on ? 'On' : 'Off') : 'Disconnected';
+    const statusEl = card.querySelector('.bulb-status-text');
+    if (statusEl) statusEl.textContent = statusText;
+
+    const toggle = card.querySelector('.bulb-toggle');
+    if (toggle) {
+        toggle.classList.toggle('on', !!bulb.is_on);
+        toggle.setAttribute('aria-label', bulb.is_on ? 'Turn off' : 'Turn on');
     }
+
+    const colourBtn = card.querySelector('.bulb-colour-btn');
+    if (colourBtn) colourBtn.style.cssText = getColourStyle(bulb);
+}
+
+async function toggleBulb(bulbId, powerOn) {
+    const bulb = state.bulbs.find(b => b.id === bulbId);
+    if (!bulb) return;
+
+    bulb.is_on = powerOn;
+    patchBulbCard(bulb);
 
     try {
         const response = await fetch(`/api/bulbs/${bulbId}/power`, {
@@ -932,29 +980,27 @@ async function toggleBulb(bulbId, powerOn) {
         const result = await response.json();
 
         if (!result.success) {
-            // Revert on failure
-            if (bulb) {
-                bulb.is_on = !powerOn;
-            }
+            bulb.is_on = !powerOn;
+            patchBulbCard(bulb);
             console.error('Failed to toggle bulb:', result.error);
         }
-
-        // Refresh actual state
-        await loadBulbStates();
     } catch (error) {
         console.error('Failed to toggle bulb:', error);
-        // Revert on failure
-        if (bulb) {
-            bulb.is_on = !powerOn;
-            renderBulbList();
-        }
+        bulb.is_on = !powerOn;
+        patchBulbCard(bulb);
     }
 }
 
 async function setAllBulbsPower(powerOn) {
-    // Disable buttons during operation
     if (bulbAllOnBtn) bulbAllOnBtn.disabled = true;
     if (bulbAllOffBtn) bulbAllOffBtn.disabled = true;
+
+    state.bulbs.forEach(bulb => {
+        if (bulb.connected) {
+            bulb.is_on = powerOn;
+            patchBulbCard(bulb);
+        }
+    });
 
     try {
         const response = await fetch('/api/bulbs/all/power', {
@@ -968,9 +1014,6 @@ async function setAllBulbsPower(powerOn) {
         if (result.success_count < result.total_count) {
             console.warn(`Bulk power: ${result.success_count}/${result.total_count} succeeded`);
         }
-
-        // Refresh state
-        await loadBulbStates();
     } catch (error) {
         console.error('Failed to set all bulbs power:', error);
     } finally {
@@ -979,20 +1022,28 @@ async function setAllBulbsPower(powerOn) {
     }
 }
 
+function applyPresetLocally(bulb, preset) {
+    if (!preset) return;
+    if (preset.hue !== undefined) bulb.hue = preset.hue;
+    if (preset.saturation !== undefined) bulb.saturation = preset.saturation;
+}
+
 async function setBulbColour(presetName) {
     const targetBulbId = state.selectedBulbId;
+    const preset = state.colourPresets[presetName];
+
+    state.bulbs.forEach(bulb => {
+        if (!bulb.connected) return;
+        if (targetBulbId && bulb.id !== targetBulbId) return;
+        applyPresetLocally(bulb, preset);
+        patchBulbCard(bulb);
+    });
+
+    const url = targetBulbId
+        ? `/api/bulbs/${targetBulbId}/colour`
+        : '/api/bulbs/all/colour';
 
     try {
-        let url = '';
-
-        if (targetBulbId) {
-            // Set colour for selected bulb only
-            url = `/api/bulbs/${targetBulbId}/colour`;
-        } else {
-            // Set colour for all bulbs
-            url = '/api/bulbs/all/colour';
-        }
-
         const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1004,9 +1055,6 @@ async function setBulbColour(presetName) {
         if (!result.success && !result.success_count) {
             console.error('Failed to set colour:', result.error);
         }
-
-        // Refresh state
-        await loadBulbStates();
     } catch (error) {
         console.error('Failed to set bulb colour:', error);
     }
@@ -1015,11 +1063,18 @@ async function setBulbColour(presetName) {
 async function setBulbBrightness(brightness) {
     const targetBulbId = state.selectedBulbId;
 
-    try {
-        const url = targetBulbId
-            ? `/api/bulbs/${targetBulbId}/brightness`
-            : '/api/bulbs/all/brightness';
+    state.bulbs.forEach(bulb => {
+        if (!bulb.connected) return;
+        if (targetBulbId && bulb.id !== targetBulbId) return;
+        bulb.brightness = brightness;
+        patchBulbCard(bulb);
+    });
 
+    const url = targetBulbId
+        ? `/api/bulbs/${targetBulbId}/brightness`
+        : '/api/bulbs/all/brightness';
+
+    try {
         const response = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1031,8 +1086,6 @@ async function setBulbBrightness(brightness) {
         if (!result.success && !result.success_count) {
             console.error('Failed to set bulb brightness:', result.error);
         }
-
-        await loadBulbStates();
     } catch (error) {
         console.error('Failed to set bulb brightness:', error);
     }
@@ -1105,9 +1158,6 @@ function handleTouchMove(e) {
     const touch = e.touches[0];
     const deltaX = touchStartX - touch.clientX; // Positive = swipe left
     const deltaY = touchStartY - touch.clientY; // Positive = swipe up
-
-    // Prevent default to avoid scrolling
-    e.preventDefault();
 
     // Centre zone: detect horizontal swipe to skip photos
     if (activeGesture === 'center_tap') {
@@ -1187,9 +1237,9 @@ function handleTouchEnd(e) {
 
 // === Event Listeners ===
 
-document.body.addEventListener('touchstart', handleTouchStart, { passive: false });
-document.body.addEventListener('touchmove', handleTouchMove, { passive: false });
-document.body.addEventListener('touchend', handleTouchEnd, { passive: false });
+document.body.addEventListener('touchstart', handleTouchStart, { passive: true });
+document.body.addEventListener('touchmove', handleTouchMove, { passive: true });
+document.body.addEventListener('touchend', handleTouchEnd, { passive: true });
 
 // Mouse click for non-touch (fallback)
 document.body.addEventListener('click', (e) => {
@@ -1282,31 +1332,26 @@ if (colourPalette) {
     });
 }
 
-// Prevent bulb panel clicks from closing or propagating
+// Bulb panel: stop propagation, handle swipe-right to close
 if (bulbPanel) {
     bulbPanel.addEventListener('click', (e) => {
         e.stopPropagation();
     });
 
-    bulbPanel.addEventListener('touchend', (e) => {
-        e.stopPropagation();
-    });
-
-    // Handle swipe right to close panel
     let panelTouchStartX = 0;
     bulbPanel.addEventListener('touchstart', (e) => {
         panelTouchStartX = e.touches[0].clientX;
     }, { passive: true });
 
     bulbPanel.addEventListener('touchend', (e) => {
+        e.stopPropagation();
         if (e.changedTouches && e.changedTouches[0]) {
             const deltaX = e.changedTouches[0].clientX - panelTouchStartX;
-            // Swipe right to close
             if (deltaX > 50) {
                 closeBulbPanel();
             }
         }
-    }, { passive: true });
+    });
 }
 
 // Prevent overlay clicks from toggling
