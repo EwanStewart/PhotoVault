@@ -135,7 +135,7 @@ html, body {
     padding: 10px 15px;
     border-radius: 12px;
     color: var(--text-primary);
-    width: 360px;
+    width: 460px;
     max-width: calc(100vw - 40px);
 }
 
@@ -156,9 +156,12 @@ html, body {
 #track-name {
     font-size: 14px;
     font-weight: 600;
-    white-space: nowrap;
+    line-height: 1.25;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
+    word-break: break-word;
 }
 
 #track-artist {
