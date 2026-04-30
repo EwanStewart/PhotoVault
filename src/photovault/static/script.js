@@ -6,6 +6,7 @@ const SKIP_DEBOUNCE = 1000;   // Debounce skip button
 const DOUBLE_TAP_DELAY = 300;
 const SWIPE_THRESHOLD = 30;
 const HORIZONTAL_SWIPE_THRESHOLD = 50;  // Threshold to determine swipe direction
+const PHOTO_SKIP_THRESHOLD = 80;        // Horizontal swipe distance to skip photo
 
 // Gesture zone percentages
 const LEFT_ZONE_PERCENT = 0.125;   // Left 12.5% for brightness
@@ -310,6 +311,24 @@ function updatePhotoInfo(photo) {
     if (liveIndicator) {
         liveIndicator.classList.toggle('visible', !!photo.isLivePhoto);
     }
+}
+
+function nextPhoto() {
+    if (state.photos.length === 0) {
+        return;
+    }
+    state.currentIndex = (state.currentIndex + 1) % state.photos.length;
+    showPhoto(state.currentIndex);
+    startSlideshow();
+}
+
+function previousPhoto() {
+    if (state.photos.length === 0) {
+        return;
+    }
+    state.currentIndex = (state.currentIndex - 1 + state.photos.length) % state.photos.length;
+    showPhoto(state.currentIndex);
+    startSlideshow();
 }
 
 function startSlideshow() {
@@ -1105,7 +1124,7 @@ function handleTouchStart(e) {
         activeGesture = 'volume_or_panel';
         gestureStartValue = state.currentVolume;
     } else {
-        activeGesture = null;
+        activeGesture = 'center_tap';
         // Start Live Photo long-press detection in center zone
         if (state.currentPhoto && state.currentPhoto.isLivePhoto) {
             handleLivePhotoPress(state.currentPhoto);
@@ -1122,6 +1141,22 @@ function handleTouchMove(e) {
 
     // Prevent default to avoid scrolling
     e.preventDefault();
+
+    // Centre zone: detect horizontal swipe to skip photos
+    if (activeGesture === 'center_tap') {
+        const absX = Math.abs(deltaX);
+        const absY = Math.abs(deltaY);
+
+        if (absX >= PHOTO_SKIP_THRESHOLD && absX > absY) {
+            activeGesture = 'photo_skip';
+            handleLivePhotoRelease();
+        }
+        return;
+    }
+
+    if (activeGesture === 'photo_skip') {
+        return;
+    }
 
     // For right edge, determine gesture direction after threshold
     if (activeGesture === 'volume_or_panel' && !gestureDirectionDetermined) {
@@ -1165,8 +1200,24 @@ function handleTouchEnd(e) {
     // Handle Live Photo release
     handleLivePhotoRelease();
 
+    // Photo skip on horizontal swipe in centre zone
+    if (activeGesture === 'photo_skip') {
+        const touch = (e.changedTouches && e.changedTouches[0]) || null;
+        if (touch) {
+            const deltaX = touch.clientX - touchStartX;
+            if (deltaX < 0) {
+                nextPhoto();
+            } else {
+                previousPhoto();
+            }
+        }
+        activeGesture = null;
+        gestureDirectionDetermined = false;
+        return;
+    }
+
     // Check for double tap (only in center zone)
-    if (!activeGesture && touchDuration < 300 && !isLiveVideoPlaying) {
+    if (activeGesture === 'center_tap' && touchDuration < 300 && !isLiveVideoPlaying) {
         if (touchEndTime - lastTapTime < DOUBLE_TAP_DELAY) {
             // Double tap detected
             toggleDisplay();
