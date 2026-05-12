@@ -1,0 +1,17 @@
+name: Deploy
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, photobox]
+    steps:
+      - name: Run deploy script
+        run: /home/ewastewa/photovault/scripts/auto-deploy.sh
