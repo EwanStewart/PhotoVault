@@ -14,4 +14,4 @@ jobs:
     runs-on: [self-hosted, photobox]
     steps:
       - name: Run deploy script
-        run: /home/ewastewa/photovault/scripts/auto-deploy.sh
+        run: bash /home/ewastewa/photovault/scripts/auto-deploy.sh
