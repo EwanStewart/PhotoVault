@@ -559,6 +559,7 @@ def serve_photo(filename):
     ext = os.path.splitext(filename)[1].lower()
 
     if ext == '.heic':
+        os.makedirs(HEIC_CACHE_DIR, exist_ok=True)
         cache_filename = os.path.splitext(filename)[0] + '.jpg'
         cache_path = os.path.join(HEIC_CACHE_DIR, cache_filename)
 
@@ -598,6 +599,7 @@ def serve_flag(country_code):
     if not re.match(r'^[a-z]{2}(-[a-z]{3})?$', country_code):
         return jsonify({'error': 'Invalid country code'}), 400
 
+    os.makedirs(FLAG_CACHE_DIR, exist_ok=True)
     cache_path = os.path.join(FLAG_CACHE_DIR, f"{country_code}.svg")
 
     if os.path.exists(cache_path):
