@@ -128,21 +128,6 @@ function formatPhotoDate(exifDate) {
 }
 
 /**
- * Shuffle array in place using Fisher-Yates algorithm.
- *
- * @param array Array to shuffle
- * @returns The shuffled array
- */
-function shuffleArray(array) {
-    for (let i = array.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [array[i], array[j]] = [array[j], array[i]];
-    }
-
-    return array;
-}
-
-/**
  * Preload the next photo in the slideshow.
  */
 function preloadNextPhoto() {
@@ -201,16 +186,21 @@ async function loadPhotos() {
             return;
         }
 
-        state.photos = shuffleArray(data);
-
-        if (state.photos.length === 0) {
+        if (data.length === 0) {
+            state.photos = [];
             showPhotoError('No photos found. Add photos to Google Drive.');
             return;
         }
 
         if (initial) {
+            state.photos = weightedShuffle(data, Date.now() / 1000);
             showPhoto(0);
             startSlideshow();
+        } else {
+            const update = insertNewPhotos(state.photos, data, state.currentIndex);
+            state.photos = mergePhotoMetadata(update.photos, data);
+            state.currentIndex = update.currentIndex;
+            refreshCurrentPhotoInfo();
         }
     } catch (error) {
         console.error('Failed to load photos:', error);
@@ -1432,7 +1422,7 @@ async function init() {
     // Set up polling intervals
     setInterval(pollNowPlaying, POLL_INTERVAL);
     setInterval(updateProgressTick, PROGRESS_TICK_INTERVAL);
-    setInterval(loadPhotos, 300000);  // Refresh photos every 5 minutes
+    setInterval(loadPhotos, 60000);  // Refresh photos every minute to match sync speed
     setInterval(loadSyncStatus, 60000);  // Check sync status every minute
 
 }
