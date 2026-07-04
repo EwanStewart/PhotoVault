@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import re
+import subprocess
 import threading
 import time
 import urllib.request
@@ -54,6 +55,9 @@ app.secret_key = _load_or_create_secret_key()
 PHOTOS_DIR = os.environ.get('PHOTOS_DIR', str(REPO_ROOT / 'photos'))
 HEIC_CACHE_DIR = '/tmp/photovault_heic_cache'
 HEIC_MAX_DIMENSION = 1600
+VIDEO_CACHE_DIR = '/tmp/photovault_video_cache'
+VIDEO_TRANSCODE_TIMEOUT_SECONDS = 300
+VIDEO_MAX_HEIGHT = 480
 FLAG_CACHE_DIR = '/tmp/photovault_flag_cache'
 GEOCODE_CACHE_FILE = str(REPO_ROOT / 'geocode_cache.json')
 GEOCODE_SAVE_DEBOUNCE_SECONDS = 5.0
@@ -81,6 +85,7 @@ SERVE_THREADS = 4
 
 # Ensure cache directories exist
 os.makedirs(HEIC_CACHE_DIR, exist_ok=True)
+os.makedirs(VIDEO_CACHE_DIR, exist_ok=True)
 os.makedirs(FLAG_CACHE_DIR, exist_ok=True)
 
 # Hardware paths - configurable via environment variables
@@ -552,7 +557,7 @@ def _get_heic_lock(filename):
         return lock
 
 
-def _heic_cache_stale(cache_path, source_path):
+def _cache_stale(cache_path, source_path):
     if not os.path.exists(cache_path):
         return True
     return os.path.getmtime(source_path) > os.path.getmtime(cache_path)
@@ -574,29 +579,64 @@ def _warm_single_heic(filename):
     cache_path = os.path.join(HEIC_CACHE_DIR, os.path.splitext(filename)[0] + '.jpg')
     try:
         with _get_heic_lock(filename):
-            if _heic_cache_stale(cache_path, filepath):
+            if _cache_stale(cache_path, filepath):
                 _convert_heic(filepath, cache_path)
                 logger.info("Warmed HEIC cache: %s", filename)
     except Exception as e:
         logger.error("Failed to warm HEIC %s: %s", filename, e)
 
 
-def _warm_heic_cache():
-    """Background pass: convert every stale HEIC so first views are fast."""
+def _video_cache_path(filename):
+    """Cache location of the H.264 transcode for a clip."""
+    return os.path.join(VIDEO_CACHE_DIR, os.path.splitext(filename)[0] + '.mp4')
+
+
+def _transcode_video(source_path, cache_path):
+    """Transcode a clip to H.264 so Chromium on the Pi can decode it."""
+    tmp_path = cache_path + '.tmp.mp4'
+    command = [
+        'ffmpeg', '-y', '-v', 'error', '-i', source_path,
+        '-vf', f'scale=-2:{VIDEO_MAX_HEIGHT}',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
+        '-an', '-movflags', '+faststart', tmp_path,
+    ]
+    subprocess.run(command, capture_output=True,
+                   timeout=VIDEO_TRANSCODE_TIMEOUT_SECONDS, check=True)
+    os.replace(tmp_path, cache_path)
+
+
+def _warm_single_video(filename):
+    """Transcode one clip into the cache if its entry is stale."""
+    filepath = os.path.join(PHOTOS_DIR, filename)
+    cache_path = _video_cache_path(filename)
+    try:
+        if _cache_stale(cache_path, filepath):
+            _transcode_video(filepath, cache_path)
+            logger.info("Transcoded Live Photo clip: %s", filename)
+    except Exception as e:
+        logger.error("Failed to transcode %s: %s", filename, e)
+
+
+def _warm_media_cache():
+    """Background pass: convert stale HEICs and transcode clips for playback."""
     os.makedirs(HEIC_CACHE_DIR, exist_ok=True)
+    os.makedirs(VIDEO_CACHE_DIR, exist_ok=True)
     refresh_photo_cache()
     with _photo_cache_lock:
         heic_files = [p['filename'] for p in _photo_cache
                       if p['filename'].lower().endswith('.heic')]
+        video_files = sorted(_video_fileset)
     for filename in heic_files:
         _warm_single_heic(filename)
+    for filename in video_files:
+        _warm_single_video(filename)
 
 
 def _start_heic_warm_thread_if_idle():
     global _heic_warm_thread
     started = False
     if _heic_warm_thread is None or not _heic_warm_thread.is_alive():
-        thread = threading.Thread(target=_warm_heic_cache, daemon=True)
+        thread = threading.Thread(target=_warm_media_cache, daemon=True)
         _heic_warm_thread = thread
         thread.start()
         started = True
@@ -626,9 +666,9 @@ def serve_photo(filename):
         cache_filename = os.path.splitext(filename)[0] + '.jpg'
         cache_path = os.path.join(HEIC_CACHE_DIR, cache_filename)
 
-        if _heic_cache_stale(cache_path, filepath):
+        if _cache_stale(cache_path, filepath):
             with _get_heic_lock(filename):
-                if _heic_cache_stale(cache_path, filepath):
+                if _cache_stale(cache_path, filepath):
                     try:
                         _convert_heic(filepath, cache_path)
                         logger.info("Converted HEIC to JPEG: %s", filename)
@@ -643,7 +683,7 @@ def serve_photo(filename):
 
 @app.route('/photos/video/<path:filename>')
 def serve_video(filename):
-    """Serve a video file for Live Photos."""
+    """Serve a Live Photo clip, preferring the H.264 transcode Chromium can play."""
     if not validate_filename(filename):
         logger.warning(f"Invalid video filename requested: {filename}")
         return jsonify({'error': 'Invalid filename'}), 400
@@ -652,6 +692,11 @@ def serve_video(filename):
     ext = os.path.splitext(filename)[1].lower()
     if ext not in VIDEO_EXTENSIONS:
         return jsonify({'error': 'Invalid file type'}), 400
+
+    cache_path = _video_cache_path(filename)
+    source_path = os.path.join(PHOTOS_DIR, filename)
+    if os.path.exists(source_path) and not _cache_stale(cache_path, source_path):
+        return send_file(cache_path, mimetype='video/mp4')
 
     return send_from_directory(PHOTOS_DIR, filename)
 

@@ -5,16 +5,26 @@ import photovault.main as main
 
 def _use_tmp_dirs(monkeypatch, tmp_path):
     photos_dir = tmp_path / 'photos'
-    cache_dir = tmp_path / 'cache'
+    heic_cache = tmp_path / 'heic_cache'
+    video_cache = tmp_path / 'video_cache'
     photos_dir.mkdir()
-    cache_dir.mkdir()
+    heic_cache.mkdir()
+    video_cache.mkdir()
     monkeypatch.setattr(main, 'PHOTOS_DIR', str(photos_dir))
-    monkeypatch.setattr(main, 'HEIC_CACHE_DIR', str(cache_dir))
-    return photos_dir, cache_dir
+    monkeypatch.setattr(main, 'HEIC_CACHE_DIR', str(heic_cache))
+    monkeypatch.setattr(main, 'VIDEO_CACHE_DIR', str(video_cache))
+    return photos_dir, heic_cache, video_cache
+
+
+def _reset_photo_cache(monkeypatch):
+    monkeypatch.setattr(main, '_start_enrich_thread_if_idle', lambda: None)
+    monkeypatch.setattr(main, '_photo_cache', [])
+    monkeypatch.setattr(main, '_photo_cache_fileset', set())
+    monkeypatch.setattr(main, '_video_fileset', set())
 
 
 def test_warm_single_heic_converts_when_cache_is_stale(monkeypatch, tmp_path):
-    photos_dir, _ = _use_tmp_dirs(monkeypatch, tmp_path)
+    photos_dir, _, _ = _use_tmp_dirs(monkeypatch, tmp_path)
     (photos_dir / 'a.heic').write_bytes(b'heic')
     converted = []
     monkeypatch.setattr(main, '_convert_heic', lambda src, dst: converted.append(dst))
@@ -26,12 +36,9 @@ def test_warm_single_heic_converts_when_cache_is_stale(monkeypatch, tmp_path):
 
 
 def test_warm_single_heic_skips_fresh_cache(monkeypatch, tmp_path):
-    photos_dir, cache_dir = _use_tmp_dirs(monkeypatch, tmp_path)
-    source = photos_dir / 'a.heic'
-    source.write_bytes(b'heic')
-    cache = cache_dir / 'a.jpg'
-    cache.write_bytes(b'jpeg')
-    cache.touch()
+    photos_dir, heic_cache, _ = _use_tmp_dirs(monkeypatch, tmp_path)
+    (photos_dir / 'a.heic').write_bytes(b'heic')
+    (heic_cache / 'a.jpg').write_bytes(b'jpeg')
     converted = []
     monkeypatch.setattr(main, '_convert_heic', lambda src, dst: converted.append(dst))
 
@@ -41,7 +48,7 @@ def test_warm_single_heic_skips_fresh_cache(monkeypatch, tmp_path):
 
 
 def test_warm_single_heic_swallows_conversion_errors(monkeypatch, tmp_path):
-    photos_dir, _ = _use_tmp_dirs(monkeypatch, tmp_path)
+    photos_dir, _, _ = _use_tmp_dirs(monkeypatch, tmp_path)
     (photos_dir / 'a.heic').write_bytes(b'heic')
 
     def broken(src, dst):
@@ -52,19 +59,67 @@ def test_warm_single_heic_swallows_conversion_errors(monkeypatch, tmp_path):
     main._warm_single_heic('a.heic')
 
 
-def test_warm_heic_cache_only_touches_heic_files(monkeypatch, tmp_path):
-    photos_dir, _ = _use_tmp_dirs(monkeypatch, tmp_path)
+def test_warm_single_video_transcodes_when_cache_is_stale(monkeypatch, tmp_path):
+    photos_dir, _, _ = _use_tmp_dirs(monkeypatch, tmp_path)
+    (photos_dir / 'clip.mov').write_bytes(b'hevc')
+    transcoded = []
+    monkeypatch.setattr(main, '_transcode_video', lambda src, dst: transcoded.append(dst))
+
+    main._warm_single_video('clip.mov')
+
+    assert len(transcoded) == 1
+    assert transcoded[0].endswith('clip.mp4')
+
+
+def test_warm_single_video_skips_fresh_cache(monkeypatch, tmp_path):
+    photos_dir, _, video_cache = _use_tmp_dirs(monkeypatch, tmp_path)
+    (photos_dir / 'clip.mov').write_bytes(b'hevc')
+    (video_cache / 'clip.mp4').write_bytes(b'h264')
+    transcoded = []
+    monkeypatch.setattr(main, '_transcode_video', lambda src, dst: transcoded.append(dst))
+
+    main._warm_single_video('clip.mov')
+
+    assert transcoded == []
+
+
+def test_warm_media_cache_covers_heics_and_videos(monkeypatch, tmp_path):
+    photos_dir, _, _ = _use_tmp_dirs(monkeypatch, tmp_path)
     (photos_dir / 'a.heic').write_bytes(b'heic')
     (photos_dir / 'b.jpg').write_bytes(b'jpeg')
-    monkeypatch.setattr(main, '_start_enrich_thread_if_idle', lambda: None)
-    monkeypatch.setattr(main, '_photo_cache', [])
-    monkeypatch.setattr(main, '_photo_cache_fileset', set())
+    (photos_dir / 'clip.mov').write_bytes(b'hevc')
+    _reset_photo_cache(monkeypatch)
     warmed = []
     monkeypatch.setattr(main, '_warm_single_heic', lambda name: warmed.append(name))
+    monkeypatch.setattr(main, '_warm_single_video', lambda name: warmed.append(name))
 
-    main._warm_heic_cache()
+    main._warm_media_cache()
 
-    assert warmed == ['a.heic']
+    assert warmed == ['a.heic', 'clip.mov']
+
+
+def test_serve_video_prefers_transcoded_cache(monkeypatch, tmp_path):
+    photos_dir, _, video_cache = _use_tmp_dirs(monkeypatch, tmp_path)
+    (photos_dir / 'clip.mov').write_bytes(b'hevc')
+    (video_cache / 'clip.mp4').write_bytes(b'h264')
+    client = main.app.test_client()
+
+    response = client.get('/photos/video/clip.mov')
+
+    assert response.status_code == 200
+    assert response.data == b'h264'
+    assert response.mimetype == 'video/mp4'
+
+
+def test_serve_video_falls_back_to_original(monkeypatch, tmp_path):
+    photos_dir, _, _ = _use_tmp_dirs(monkeypatch, tmp_path)
+    (photos_dir / 'clip.mov').write_bytes(b'hevc')
+    client = main.app.test_client()
+
+    response = client.get('/photos/video/clip.mov')
+
+    assert response.status_code == 200
+    assert response.data == b'hevc'
 
 
 def test_warm_cache_endpoint_reports_started_then_already_running(monkeypatch):
@@ -75,7 +130,7 @@ def test_warm_cache_endpoint_reports_started_then_already_running(monkeypatch):
         running.set()
         release.wait(timeout=5)
 
-    monkeypatch.setattr(main, '_warm_heic_cache', slow_warm)
+    monkeypatch.setattr(main, '_warm_media_cache', slow_warm)
     monkeypatch.setattr(main, '_heic_warm_thread', None)
     client = main.app.test_client()
 
