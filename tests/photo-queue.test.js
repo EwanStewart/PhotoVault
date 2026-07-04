@@ -103,3 +103,20 @@ test('insertNewPhotos does not mutate its inputs', () => {
     assert.deepStrictEqual(queue, queueCopy);
     assert.deepStrictEqual(incoming, incomingCopy);
 });
+
+
+const { shouldStartLiveVideo } = require('../src/photovault/static/photo-queue.js');
+
+test('shouldStartLiveVideo starts a live photo that has not played and is idle', () => {
+    assert.strictEqual(shouldStartLiveVideo({ isLivePhoto: true }, false, false), true);
+});
+
+test('shouldStartLiveVideo ignores non-live photos', () => {
+    assert.strictEqual(shouldStartLiveVideo({ isLivePhoto: false }, false, false), false);
+    assert.strictEqual(shouldStartLiveVideo(null, false, false), false);
+});
+
+test('shouldStartLiveVideo does not replay after its one-shot or while playing', () => {
+    assert.strictEqual(shouldStartLiveVideo({ isLivePhoto: true }, true, false), false);
+    assert.strictEqual(shouldStartLiveVideo({ isLivePhoto: true }, false, true), false);
+});

@@ -103,6 +103,22 @@ function insertNewPhotos(queue, incoming, currentIndex, rng = Math.random) {
     };
 }
 
+/**
+ * Decide whether to start a Live Photo clip on the current display.
+ *
+ * Covers the case where a photo becomes a Live Photo after it is already
+ * on screen (its clip synced or its metadata enriched late). Fires at
+ * most once per display and never while a clip is already playing.
+ *
+ * @param photo The photo currently on screen
+ * @param alreadyAutoplayed Whether this display already started its clip
+ * @param isPlaying Whether a clip is playing right now
+ * @returns True if the clip should start
+ */
+function shouldStartLiveVideo(photo, alreadyAutoplayed, isPlaying) {
+    return !!photo && !!photo.isLivePhoto && !alreadyAutoplayed && !isPlaying;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { weightedShuffle, insertNewPhotos };
+    module.exports = { weightedShuffle, insertNewPhotos, shouldStartLiveVideo };
 }

@@ -157,6 +157,16 @@ const LIVE_VIDEO_START_DELAY_MS = 1100;
 let longPressTimer = null;
 let liveVideoStartTimer = null;
 let isLiveVideoPlaying = false;
+let currentPhotoAutoplayed = false;
+
+function scheduleLiveVideo(photo) {
+    if (liveVideoStartTimer) {
+        clearTimeout(liveVideoStartTimer);
+    }
+    currentPhotoAutoplayed = true;
+    // Wait out the crossfade; fading and decoding together stutter on the Pi
+    liveVideoStartTimer = setTimeout(() => playLiveVideo(photo), LIVE_VIDEO_START_DELAY_MS);
+}
 
 // === Photo Management ===
 
@@ -272,13 +282,9 @@ function showPhoto(index) {
         updatePhotoInfo(photo);
 
         stopLiveVideo();
-        if (liveVideoStartTimer) {
-            clearTimeout(liveVideoStartTimer);
-            liveVideoStartTimer = null;
-        }
+        currentPhotoAutoplayed = false;
         if (photo.isLivePhoto) {
-            // Wait out the crossfade; fading and decoding together stutter on the Pi
-            liveVideoStartTimer = setTimeout(() => playLiveVideo(photo), LIVE_VIDEO_START_DELAY_MS);
+            scheduleLiveVideo(photo);
         }
 
         preloadNextPhoto();
@@ -344,12 +350,25 @@ function updatePhotoInfo(photo) {
 }
 
 function refreshCurrentPhotoInfo() {
-    if (state.currentPhoto) {
-        const updated = state.photos.find(p => p.filename === state.currentPhoto.filename);
-        if (updated && updated !== state.currentPhoto) {
-            state.currentPhoto = updated;
-            updatePhotoInfo(updated);
-        }
+    if (!state.currentPhoto) {
+        return;
+    }
+
+    const updated = state.photos.find(p => p.filename === state.currentPhoto.filename);
+    if (!updated) {
+        // The displayed photo was moved into a folder or removed on Drive;
+        // re-render the current slot so its badge and clip pick up.
+        showPhoto(state.currentIndex);
+        return;
+    }
+
+    if (updated !== state.currentPhoto) {
+        state.currentPhoto = updated;
+        updatePhotoInfo(updated);
+    }
+
+    if (shouldStartLiveVideo(updated, currentPhotoAutoplayed, isLiveVideoPlaying)) {
+        scheduleLiveVideo(updated);
     }
 }
 
