@@ -1,7 +1,24 @@
+import os
 import threading
 import time
 
 import photovault.main as main
+
+
+def test_cache_dirs_are_persistent_not_tmpfs():
+    for cache_dir in (main.HEIC_CACHE_DIR, main.VIDEO_CACHE_DIR, main.FLAG_CACHE_DIR):
+        assert not cache_dir.startswith('/tmp'), cache_dir
+        assert cache_dir.startswith(main.CACHE_ROOT), cache_dir
+
+
+def test_resolve_cache_root_honours_env(monkeypatch):
+    monkeypatch.setenv('PHOTOVAULT_CACHE_DIR', '/mnt/persistent/cache')
+    assert main._resolve_cache_root() == '/mnt/persistent/cache'
+
+
+def test_resolve_cache_root_defaults_under_repo(monkeypatch):
+    monkeypatch.delenv('PHOTOVAULT_CACHE_DIR', raising=False)
+    assert main._resolve_cache_root() == str(main.REPO_ROOT / 'cache')
 
 
 def _use_tmp_dirs(monkeypatch, tmp_path):

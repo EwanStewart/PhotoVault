@@ -55,13 +55,26 @@ app.secret_key = _load_or_create_secret_key()
 
 PHOTOS_DIR = os.environ.get('PHOTOS_DIR', str(REPO_ROOT / 'photos'))
 PHOTO_REMOTE = os.environ.get('PHOTO_REMOTE', 'gdrive:PhotoFrame')
-HEIC_CACHE_DIR = '/tmp/photovault_heic_cache'
+
+
+def _resolve_cache_root():
+    """Cache root, persistent on the SD card by default so it survives reboots.
+
+    The Pi mounts /tmp as tmpfs, so caching there wastes RAM and is wiped on
+    every reboot, forcing a full re-convert and re-transcode. Default under the
+    repo instead; override with PHOTOVAULT_CACHE_DIR.
+    """
+    return os.environ.get('PHOTOVAULT_CACHE_DIR', str(REPO_ROOT / 'cache'))
+
+
+CACHE_ROOT = _resolve_cache_root()
+HEIC_CACHE_DIR = os.path.join(CACHE_ROOT, 'heic')
 HEIC_MAX_DIMENSION = 1600
-VIDEO_CACHE_DIR = '/tmp/photovault_video_cache'
+VIDEO_CACHE_DIR = os.path.join(CACHE_ROOT, 'video')
 VIDEO_TRANSCODE_TIMEOUT_SECONDS = 300
 VIDEO_MAX_HEIGHT = 480
 VIDEO_FPS = 24
-FLAG_CACHE_DIR = '/tmp/photovault_flag_cache'
+FLAG_CACHE_DIR = os.path.join(CACHE_ROOT, 'flag')
 GEOCODE_CACHE_FILE = str(REPO_ROOT / 'geocode_cache.json')
 GEOCODE_SAVE_DEBOUNCE_SECONDS = 5.0
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.heic'}

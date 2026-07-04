@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 .env
 .cache/
+cache/
 photos/
 geocode_cache.json
 .secret_key
