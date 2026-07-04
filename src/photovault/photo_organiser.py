@@ -1,12 +1,15 @@
 """Move located photos into per-location folders on Google Drive.
 
-Once enrichment reverse-geocodes a photo, the file still sits at the
-root of the Drive folder. This module plans and runs server-side rclone
-moves into a folder named after the location. The sync watcher then
-mirrors the new layout locally.
+Once enrichment reverse-geocodes a photo, this module plans and runs
+server-side rclone moves so the layout matches the location. A plain
+photo lands in a folder named after its location. A Live Photo lands in
+its own folder, named after the photo, holding just the still and its
+clip. Planning is idempotent: a file already in the right place is left
+alone. The sync watcher then mirrors the new layout locally.
 """
 
 import logging
+import os
 import subprocess
 
 logger = logging.getLogger(__name__)
@@ -20,18 +23,30 @@ def _folder_name(location):
 
 
 def plan_moves(photos):
-    """List (source, destination) moves for located photos still at the root."""
+    """List (source, destination) moves that sort located photos into folders."""
     moves = []
     for photo in photos:
         location = photo.get('location')
         filename = photo.get('filename', '')
-        if not location or '/' in filename:
+        if not location or not filename:
             continue
         folder = _folder_name(location)
-        moves.append((filename, f'{folder}/{filename}'))
+        photo_name = os.path.basename(filename)
         video = photo.get('videoFilename')
-        if video and '/' not in video:
-            moves.append((video, f'{folder}/{video}'))
+        if video:
+            video_name = os.path.basename(video)
+            stem = os.path.splitext(photo_name)[0]
+            pair_folder = f'{folder}/{stem}'
+            photo_target = f'{pair_folder}/{photo_name}'
+            video_target = f'{pair_folder}/{video_name}'
+            if filename != photo_target:
+                moves.append((filename, photo_target))
+            if video != video_target:
+                moves.append((video, video_target))
+        else:
+            photo_target = f'{folder}/{photo_name}'
+            if filename != photo_target:
+                moves.append((filename, photo_target))
     return moves
 
 

@@ -20,7 +20,7 @@ def test_skips_photos_without_location_or_already_in_folders():
     assert moves == []
 
 
-def test_moves_the_paired_clip_alongside_the_photo():
+def test_pairs_go_into_their_own_folder_named_after_the_photo():
     photos = [{
         'filename': 'a.heic',
         'location': 'Angus, Scotland',
@@ -30,9 +30,36 @@ def test_moves_the_paired_clip_alongside_the_photo():
     moves = organiser.plan_moves(photos)
 
     assert moves == [
-        ('a.heic', 'Angus, Scotland/a.heic'),
-        ('clip.mov', 'Angus, Scotland/clip.mov'),
+        ('a.heic', 'Angus, Scotland/a/a.heic'),
+        ('clip.mov', 'Angus, Scotland/a/clip.mov'),
     ]
+
+
+def test_moves_an_existing_location_pair_into_its_own_folder():
+    photos = [{
+        'filename': 'North Berwick, Scotland/a.heic',
+        'location': 'North Berwick, Scotland',
+        'videoFilename': 'North Berwick, Scotland/clip.mov',
+    }]
+
+    moves = organiser.plan_moves(photos)
+
+    assert moves == [
+        ('North Berwick, Scotland/a.heic', 'North Berwick, Scotland/a/a.heic'),
+        ('North Berwick, Scotland/clip.mov', 'North Berwick, Scotland/a/clip.mov'),
+    ]
+
+
+def test_pair_already_in_its_folder_is_left_alone():
+    photos = [{
+        'filename': 'Angus, Scotland/a/a.heic',
+        'location': 'Angus, Scotland',
+        'videoFilename': 'Angus, Scotland/a/clip.mov',
+    }]
+
+    moves = organiser.plan_moves(photos)
+
+    assert moves == []
 
 
 def test_folder_names_never_contain_path_separators():
