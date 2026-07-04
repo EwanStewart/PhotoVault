@@ -71,6 +71,7 @@ _photo_cache = []
 _photo_cache_fileset = set()
 _photo_cache_lock = threading.Lock()
 _photo_enrich_thread = None
+_heic_warm_thread = None
 _heic_locks = {}
 _heic_locks_lock = threading.Lock()
 BIND_HOST = os.environ.get('PHOTOVAULT_BIND_HOST', '127.0.0.1')
@@ -548,6 +549,49 @@ def _convert_heic(source_path, cache_path):
         tmp_path = cache_path + '.tmp'
         img.save(tmp_path, 'JPEG', quality=85, optimize=True)
     os.replace(tmp_path, cache_path)
+
+
+def _warm_single_heic(filename):
+    """Convert one HEIC into the cache if its entry is stale."""
+    filepath = os.path.join(PHOTOS_DIR, filename)
+    cache_path = os.path.join(HEIC_CACHE_DIR, os.path.splitext(filename)[0] + '.jpg')
+    try:
+        with _get_heic_lock(filename):
+            if _heic_cache_stale(cache_path, filepath):
+                _convert_heic(filepath, cache_path)
+                logger.info("Warmed HEIC cache: %s", filename)
+    except Exception as e:
+        logger.error("Failed to warm HEIC %s: %s", filename, e)
+
+
+def _warm_heic_cache():
+    """Background pass: convert every stale HEIC so first views are fast."""
+    os.makedirs(HEIC_CACHE_DIR, exist_ok=True)
+    refresh_photo_cache()
+    with _photo_cache_lock:
+        heic_files = [p['filename'] for p in _photo_cache
+                      if p['filename'].lower().endswith('.heic')]
+    for filename in heic_files:
+        _warm_single_heic(filename)
+
+
+def _start_heic_warm_thread_if_idle():
+    global _heic_warm_thread
+    started = False
+    if _heic_warm_thread is None or not _heic_warm_thread.is_alive():
+        thread = threading.Thread(target=_warm_heic_cache, daemon=True)
+        _heic_warm_thread = thread
+        thread.start()
+        started = True
+    return started
+
+
+@app.route('/api/photos/warm-cache', methods=['POST'])
+def warm_photo_cache():
+    """Convert stale HEIC files in the background; called after each sync."""
+    started = _start_heic_warm_thread_if_idle()
+    status = 'started' if started else 'already_running'
+    return jsonify({'status': status})
 
 
 @app.route('/photos/<path:filename>')

@@ -32,6 +32,9 @@ if rclone sync gdrive:PhotoFrame "$PHOTOS_DIR" --exclude ".*" --exclude "*.tmp" 
     echo "$(date -Iseconds)|success|$PHOTO_COUNT" > "$SYNC_STATUS_FILE"
 
     log "Photo sync complete: $PHOTO_COUNT photos, $VIDEO_COUNT Live Photo videos"
+
+    # Warm the HEIC cache so the first view of each new photo is fast
+    curl -s -X POST --max-time 5 http://localhost:5000/api/photos/warm-cache > /dev/null 2>&1 || true
 else
     # Write error status
     echo "$(date -Iseconds)|error|0" > "$SYNC_STATUS_FILE"
