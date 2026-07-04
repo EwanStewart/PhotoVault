@@ -7,6 +7,7 @@ import time
 import urllib.request
 import urllib.error
 from pathlib import Path
+import waitress
 from flask import Flask, render_template, jsonify, send_from_directory, redirect, request, send_file
 from photovault.spotify_client import SpotifyClient
 from photovault.tapo_client import TapoBulbClient, COLOUR_PRESETS
@@ -73,6 +74,7 @@ _photo_enrich_thread = None
 _heic_locks = {}
 _heic_locks_lock = threading.Lock()
 BIND_HOST = os.environ.get('PHOTOVAULT_BIND_HOST', '127.0.0.1')
+SERVE_THREADS = 4
 
 # Ensure cache directories exist
 os.makedirs(HEIC_CACHE_DIR, exist_ok=True)
@@ -1107,8 +1109,13 @@ def _warm_caches_on_startup():
     tapo.start_background_connect()
 
 
-if __name__ == '__main__':
+def serve():
+    """Start the app under a threaded WSGI server."""
     load_geocode_cache_from_disk()
     _warm_caches_on_startup()
     logger.info("Starting Photo Frame server on %s:5000", BIND_HOST)
-    app.run(host=BIND_HOST, port=5000, debug=False)
+    waitress.serve(app, host=BIND_HOST, port=5000, threads=SERVE_THREADS)
+
+
+if __name__ == '__main__':
+    serve()
