@@ -1,6 +1,7 @@
 // Configuration
 const SLIDE_INTERVAL = 30000; // 30 seconds per photo
 const POLL_INTERVAL = 5000;   // Poll Spotify every 5 seconds
+const PROGRESS_TICK_INTERVAL = 250; // Interpolate progress bar between polls
 const OVERLAY_TIMEOUT = 10000; // Hide overlay after 10 seconds
 const SKIP_DEBOUNCE = 1000;   // Debounce skip button
 const DOUBLE_TAP_DELAY = 300;
@@ -21,6 +22,7 @@ const state = {
     displayOn: true,
     currentTrackId: null,
     isTrackSaved: false,
+    progress: null,
     showQueue: false,
     theme: {
         accent_color: '#1DB954',
@@ -415,7 +417,12 @@ async function pollNowPlaying() {
                 albumArt.style.display = 'none';
             }
 
-            // Update progress bar
+            // Update progress bar and rebase interpolation on fresh data
+            state.progress = {
+                baseMs: data.progress_ms || 0,
+                durationMs: data.duration_ms || 0,
+                fetchedAt: Date.now()
+            };
             updateProgressBar(data.progress_ms, data.duration_ms);
 
             // Update pause button state
@@ -434,6 +441,7 @@ async function pollNowPlaying() {
             trackName.textContent = 'Not Playing';
             trackArtist.textContent = '';
             albumArt.style.display = 'none';
+            state.progress = null;
             updateProgressBar(0, 0);
 
             // Hide overlay when nothing is playing
@@ -454,6 +462,37 @@ function updateProgressBar(progress, duration) {
 
     const percent = (progress / duration) * 100;
     progressFill.style.width = `${percent}%`;
+}
+
+function currentProgressMs() {
+    let progressMs = 0;
+
+    if (state.progress) {
+        const elapsedMs = state.isPaused ? 0 : Date.now() - state.progress.fetchedAt;
+        progressMs = interpolateTrackProgress(
+            state.progress.baseMs,
+            elapsedMs,
+            state.progress.durationMs
+        );
+    }
+
+    return progressMs;
+}
+
+function updateProgressTick() {
+    if (state.isPlaying && state.progress) {
+        updateProgressBar(currentProgressMs(), state.progress.durationMs);
+    }
+}
+
+function rebaseProgress() {
+    if (state.progress) {
+        state.progress = {
+            baseMs: currentProgressMs(),
+            durationMs: state.progress.durationMs,
+            fetchedAt: Date.now()
+        };
+    }
 }
 
 function updatePauseButton() {
@@ -540,6 +579,7 @@ async function togglePlayback(e) {
     try {
         const response = await fetch(endpoint, { method: 'POST' });
         if (response.ok) {
+            rebaseProgress();
             state.isPaused = !state.isPaused;
             updatePauseButton();
         }
@@ -1391,6 +1431,7 @@ async function init() {
 
     // Set up polling intervals
     setInterval(pollNowPlaying, POLL_INTERVAL);
+    setInterval(updateProgressTick, PROGRESS_TICK_INTERVAL);
     setInterval(loadPhotos, 300000);  // Refresh photos every 5 minutes
     setInterval(loadSyncStatus, 60000);  // Check sync status every minute
 
