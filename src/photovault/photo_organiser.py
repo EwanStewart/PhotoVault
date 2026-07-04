@@ -36,9 +36,13 @@ def plan_moves(photos):
 
 
 def _run_rclone(args):
-    """Run one rclone command, raising on failure."""
-    subprocess.run(['rclone'] + args, capture_output=True, text=True,
-                   timeout=RCLONE_TIMEOUT_SECONDS, check=True)
+    """Run one rclone command, raising with rclone's own error on failure."""
+    completed = subprocess.run(['rclone'] + args, capture_output=True, text=True,
+                               timeout=RCLONE_TIMEOUT_SECONDS)
+    if completed.returncode != 0:
+        stderr = completed.stderr.strip()
+        detail = stderr.splitlines()[-1] if stderr else f'exit status {completed.returncode}'
+        raise RuntimeError(detail)
 
 
 def organise(remote, photos):

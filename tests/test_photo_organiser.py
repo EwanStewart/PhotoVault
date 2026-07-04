@@ -72,3 +72,19 @@ def test_organise_carries_on_after_a_failed_move(monkeypatch):
     moved = organiser.organise('gdrive:PhotoFrame', photos)
 
     assert moved == 1
+
+
+def test_run_rclone_surfaces_the_rclone_error(monkeypatch):
+    class Completed:
+        returncode = 1
+        stderr = 'notice: making dir\nreason: insufficient permission'
+
+    monkeypatch.setattr(organiser.subprocess, 'run', lambda *a, **k: Completed())
+
+    try:
+        organiser._run_rclone(['moveto', 'a', 'b'])
+        raised = False
+    except RuntimeError as e:
+        raised = 'insufficient permission' in str(e)
+
+    assert raised
