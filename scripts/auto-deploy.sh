@@ -25,5 +25,8 @@ fi
 echo "Updating photovault: ${LOCAL:0:7} -> ${REMOTE:0:7}"
 git reset --hard "origin/$BRANCH"
 venv/bin/pip install --quiet --upgrade -r requirements.txt
-sudo -n /bin/systemctl restart photovault-kiosk.service photovault-brightness.service
+sudo -n cp systemd/*.service /etc/systemd/system/
+sudo -n /bin/systemctl daemon-reload
+sudo -n /bin/systemctl enable --quiet photovault-sync.service
+sudo -n /bin/systemctl restart photovault-kiosk.service photovault-brightness.service photovault-sync.service
 echo "Restarted photovault at $(git rev-parse --short HEAD)"

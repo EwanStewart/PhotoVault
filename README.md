@@ -35,7 +35,7 @@ All data paths default to directories under the repo root, so the install locati
 
 ## Installing on a Pi
 
-Clone the repo to `/home/<user>/photovault` and run the steps below. The first step creates a venv and installs Python dependencies. The remaining steps install and enable the systemd units. They also add cron entries for photo sync and the display schedule.
+Clone the repo to `/home/<user>/photovault` and run the steps below. The first step creates a venv and installs Python dependencies. The remaining steps install and enable the systemd units. They also add a cron entry for the display schedule.
 
 ```bash
 ./install_venv.sh
@@ -44,12 +44,12 @@ cp .env.example .env       # fill in Spotify credentials
 # Install systemd units
 sudo cp systemd/photovault-kiosk.service /etc/systemd/system/
 sudo cp systemd/photovault-brightness.service /etc/systemd/system/
+sudo cp systemd/photovault-sync.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now photovault-kiosk.service photovault-brightness.service
+sudo systemctl enable --now photovault-kiosk.service photovault-brightness.service photovault-sync.service
 
-# Install cron entries
+# Install cron entry
 ( crontab -l 2>/dev/null; \
-  echo "*/30 * * * * $(pwd)/scripts/sync-photos.sh"; \
   echo "* * * * * $(pwd)/scripts/display-schedule.sh" \
 ) | crontab -
 ```
@@ -58,7 +58,7 @@ Visit `http://<pi>:5000` and click "Connect Spotify" once to authorise the integ
 
 ## Google Drive sync
 
-Configure rclone once with a remote named `gdrive` pointing at a folder called `PhotoFrame` in your Google Drive. The sync script handles everything after that, and cron calls it every half hour.
+Configure rclone once with a remote named `gdrive` pointing at a folder called `PhotoFrame` in your Google Drive. The photovault-sync service watches that folder. Every minute it lists the remote, which is one cheap API call. It runs a full sync only when the listing changes, so new photos appear within about a minute of upload. Set `SYNC_POLL_INTERVAL` (seconds) or `SYNC_REMOTE` in the unit to override the defaults.
 
 ```bash
 rclone config              # create remote "gdrive", type Google Drive
