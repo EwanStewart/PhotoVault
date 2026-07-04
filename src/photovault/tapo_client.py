@@ -34,6 +34,9 @@ COLOUR_PRESETS = {
 MAX_RETRY_ATTEMPTS = 3
 BASE_RETRY_DELAY_SECONDS = 2
 
+# Reconnect worst case: three 10s discovery attempts plus 4s and 8s backoff waits
+RECONNECT_TIMEOUT_SECONDS = 60
+
 
 class BulbConnection:
     """
@@ -219,7 +222,7 @@ class TapoBulbClient:
     _loop_lock = threading.Lock()
     _async_timeout_seconds = 5
 
-    def _run_async(self, coroutine):
+    def _run_async(self, coroutine, timeout=None):
         if TapoBulbClient._loop is None:
             with TapoBulbClient._loop_lock:
                 if TapoBulbClient._loop is None:
@@ -228,7 +231,7 @@ class TapoBulbClient:
                     thread.start()
                     TapoBulbClient._loop = loop
         future = asyncio.run_coroutine_threadsafe(coroutine, TapoBulbClient._loop)
-        return future.result(timeout=self._async_timeout_seconds)
+        return future.result(timeout=timeout if timeout is not None else self._async_timeout_seconds)
 
     def start_background_connect(self):
         """Trigger connect_all in a daemon thread; safe to call from app startup."""
@@ -620,5 +623,8 @@ class TapoBulbClient:
         @param bulb_id The ID of the bulb to reconnect
         @returns Result dictionary with success status
         """
-        return self._run_async(self._reconnect_bulb_async(bulb_id))
+        return self._run_async(
+            self._reconnect_bulb_async(bulb_id),
+            timeout=RECONNECT_TIMEOUT_SECONDS
+        )
 
