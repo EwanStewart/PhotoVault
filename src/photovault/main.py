@@ -58,6 +58,7 @@ HEIC_MAX_DIMENSION = 1600
 VIDEO_CACHE_DIR = '/tmp/photovault_video_cache'
 VIDEO_TRANSCODE_TIMEOUT_SECONDS = 300
 VIDEO_MAX_HEIGHT = 480
+VIDEO_FPS = 24
 FLAG_CACHE_DIR = '/tmp/photovault_flag_cache'
 GEOCODE_CACHE_FILE = str(REPO_ROOT / 'geocode_cache.json')
 GEOCODE_SAVE_DEBOUNCE_SECONDS = 5.0
@@ -592,12 +593,17 @@ def _video_cache_path(filename):
 
 
 def _transcode_video(source_path, cache_path):
-    """Transcode a clip to H.264 so Chromium on the Pi can decode it."""
+    """Transcode a clip to H.264 so Chromium on the Pi can decode it.
+
+    The kiosk runs Chromium with the GPU disabled, so decode cost decides
+    playback smoothness: baseline profile, fastdecode tuning and 24 fps.
+    """
     tmp_path = cache_path + '.tmp.mp4'
     command = [
         'ffmpeg', '-y', '-v', 'error', '-i', source_path,
-        '-vf', f'scale=-2:{VIDEO_MAX_HEIGHT}',
-        '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
+        '-vf', f'scale=-2:{VIDEO_MAX_HEIGHT},fps={VIDEO_FPS}',
+        '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'fastdecode',
+        '-profile:v', 'baseline', '-crf', '23',
         '-an', '-movflags', '+faststart', tmp_path,
     ]
     subprocess.run(command, capture_output=True,

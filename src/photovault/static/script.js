@@ -153,7 +153,9 @@ function preloadNextPhoto() {
 }
 
 // Live Photo tracking
+const LIVE_VIDEO_START_DELAY_MS = 1100;
 let longPressTimer = null;
+let liveVideoStartTimer = null;
 let isLiveVideoPlaying = false;
 
 // === Photo Management ===
@@ -271,8 +273,13 @@ function showPhoto(index) {
         updatePhotoInfo(photo);
 
         stopLiveVideo();
+        if (liveVideoStartTimer) {
+            clearTimeout(liveVideoStartTimer);
+            liveVideoStartTimer = null;
+        }
         if (photo.isLivePhoto) {
-            playLiveVideo(photo);
+            // Wait out the crossfade; fading and decoding together stutter on the Pi
+            liveVideoStartTimer = setTimeout(() => playLiveVideo(photo), LIVE_VIDEO_START_DELAY_MS);
         }
 
         preloadNextPhoto();
