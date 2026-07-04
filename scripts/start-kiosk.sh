@@ -6,6 +6,12 @@ export XAUTHORITY=/home/ewastewa/.Xauthority
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+# The unit uses KillMode=process, so a restart orphans the previous Flask.
+# Kill it first or the new one cannot bind port 5000 and the health check
+# passes against stale code. The bracket stops pkill matching itself.
+pkill -f "photovault[.]main" || true
+sleep 1
+
 # Start Flask app in background
 echo "Starting Flask app"
 "${REPO_DIR}/run.sh" &
