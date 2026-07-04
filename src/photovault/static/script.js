@@ -271,6 +271,11 @@ function showPhoto(index) {
         state.currentPhoto = photo;
         updatePhotoInfo(photo);
 
+        stopLiveVideo();
+        if (photo.isLivePhoto) {
+            playLiveVideo(photo);
+        }
+
         preloadNextPhoto();
     };
 
