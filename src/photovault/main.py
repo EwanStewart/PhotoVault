@@ -11,6 +11,7 @@ from pathlib import Path
 import waitress
 from flask import Flask, render_template, jsonify, send_from_directory, redirect, request, send_file
 import photovault.live_photos as live_photos
+import photovault.photo_organiser as photo_organiser
 from photovault.spotify_client import SpotifyClient
 from photovault.tapo_client import TapoBulbClient, COLOUR_PRESETS
 import pycountry
@@ -53,6 +54,7 @@ def _load_or_create_secret_key():
 app.secret_key = _load_or_create_secret_key()
 
 PHOTOS_DIR = os.environ.get('PHOTOS_DIR', str(REPO_ROOT / 'photos'))
+PHOTO_REMOTE = os.environ.get('PHOTO_REMOTE', 'gdrive:PhotoFrame')
 HEIC_CACHE_DIR = '/tmp/photovault_heic_cache'
 HEIC_MAX_DIMENSION = 1600
 VIDEO_CACHE_DIR = '/tmp/photovault_video_cache'
@@ -104,14 +106,12 @@ tapo = TapoBulbClient()
 
 
 def validate_filename(filename):
-    """Validate filename to prevent directory traversal attacks."""
-    if not filename:
-        return False
-    # Reject any path separators or parent directory references
-    if '..' in filename or '/' in filename or '\\' in filename:
-        return False
-    # Only allow files in the photos directory
-    return os.path.basename(filename) == filename
+    """Validate a photos-relative path to prevent directory traversal."""
+    result = bool(filename) and '\\' not in filename
+    if result:
+        segments = filename.split('/')
+        result = all(segment not in ('', '.', '..') for segment in segments)
+    return result
 
 
 def get_json_or_error():
@@ -394,10 +394,11 @@ def find_live_photo_video(photo_path):
     for ext in ['.MOV', '.mov']:
         video_path = base_name + ext
         if os.path.exists(video_path):
-            result = os.path.basename(video_path)
+            result = os.path.relpath(video_path, PHOTOS_DIR)
             break
     if result is None:
-        result = live_photos.find_paired_video(PHOTOS_DIR, os.path.basename(photo_path))
+        result = live_photos.find_paired_video(
+            PHOTOS_DIR, os.path.relpath(photo_path, PHOTOS_DIR))
     return result
 
 
@@ -461,13 +462,22 @@ def _build_photo_stub(filename):
         return {'filename': filename, 'modified': 0, 'size': 0, '_enriched': False}
 
 
+def _organise_remote_photos():
+    """Move located root-level photos into location folders on Drive."""
+    with _photo_cache_lock:
+        snapshot = [dict(p) for p in _photo_cache]
+    moved = photo_organiser.organise(PHOTO_REMOTE, snapshot)
+    if moved:
+        logger.info("Organised %d files into location folders on Drive", moved)
+
+
 def _enrich_pending_photos():
     """Background pass: fill EXIF/geocode/live-photo data on stubs."""
     while True:
         with _photo_cache_lock:
             target = next((p for p in _photo_cache if not p.get('_enriched')), None)
         if target is None:
-            return
+            break
 
         enriched = build_photo_data(target['filename'])
         with _photo_cache_lock:
@@ -479,6 +489,8 @@ def _enrich_pending_photos():
                     else:
                         photo['_enriched'] = True
                     break
+
+    _organise_remote_photos()
 
 
 def _start_enrich_thread_if_idle():
@@ -502,15 +514,14 @@ def refresh_photo_cache():
 
     current_files = set()
     current_videos = set()
-    with os.scandir(PHOTOS_DIR) as it:
-        for entry in it:
-            if not entry.is_file():
-                continue
-            ext = os.path.splitext(entry.name)[1].lower()
+    for root, _, files in os.walk(PHOTOS_DIR):
+        for name in files:
+            rel_path = os.path.relpath(os.path.join(root, name), PHOTOS_DIR)
+            ext = os.path.splitext(name)[1].lower()
             if ext in ALLOWED_EXTENSIONS:
-                current_files.add(entry.name)
+                current_files.add(rel_path)
             elif ext in VIDEO_EXTENSIONS:
-                current_videos.add(entry.name)
+                current_videos.add(rel_path)
 
     with _photo_cache_lock:
         videos_changed = current_videos != _video_fileset
@@ -565,6 +576,7 @@ def _cache_stale(cache_path, source_path):
 
 
 def _convert_heic(source_path, cache_path):
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
     with Image.open(source_path) as img:
         if img.mode in ('RGBA', 'P'):
             img = img.convert('RGB')
@@ -598,6 +610,7 @@ def _transcode_video(source_path, cache_path):
     The kiosk runs Chromium with the GPU disabled, so decode cost decides
     playback smoothness: baseline profile, fastdecode tuning and 24 fps.
     """
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
     tmp_path = cache_path + '.tmp.mp4'
     command = [
         'ffmpeg', '-y', '-v', 'error', '-i', source_path,

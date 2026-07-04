@@ -60,6 +60,8 @@ Visit `http://<pi>:5000` and click "Connect Spotify" once to authorise the integ
 
 Configure rclone once with a remote named `gdrive` pointing at a folder called `PhotoFrame` in your Google Drive. The photovault-sync service watches that folder. Every minute it lists the remote, which is one cheap API call. It runs a full sync only when the listing changes, so new photos appear within about a minute of upload. Set `SYNC_POLL_INTERVAL` (seconds) or `SYNC_REMOTE` in the unit to override the defaults.
 
+Once a photo's location is known from its EXIF GPS, the app moves it into a folder named after that location on Drive, for example `PhotoFrame/Fife, Scotland/`. Live Photo clips move together with their photo. Photos without GPS data stay at the root. Set `PHOTO_REMOTE` to override the remote the moves target.
+
 ```bash
 rclone config              # create remote "gdrive", type Google Drive
 ./scripts/sync-photos.sh   # run once manually for the first sync

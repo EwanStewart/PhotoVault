@@ -148,7 +148,7 @@ function preloadNextPhoto() {
 
     const image = new Image();
     image.decoding = 'async';
-    image.src = `/photos/${encodeURIComponent(filename)}`;
+    image.src = photoUrl(filename);
     preloadedImage = { image, filename };
 }
 
@@ -237,7 +237,6 @@ function showPhoto(index) {
 
     const photo = state.photos[index];
     const filename = typeof photo === 'string' ? photo : photo.filename;
-    const photoUrl = `/photos/${encodeURIComponent(filename)}`;
 
     const nextImg = photoCurrent.classList.contains('active') ? photoNext : photoCurrent;
     const currentImg = photoCurrent.classList.contains('active') ? photoCurrent : photoNext;
@@ -252,7 +251,7 @@ function showPhoto(index) {
     } else {
         img = new Image();
         img.decoding = 'async';
-        img.src = photoUrl;
+        img.src = photoUrl(filename);
     }
 
     let handled = false;
@@ -782,7 +781,7 @@ function playLiveVideo(photo) {
     if (!liveVideo || !photo.videoFilename) return;
 
     isLiveVideoPlaying = true;
-    liveVideo.src = `/photos/video/${encodeURIComponent(photo.videoFilename)}`;
+    liveVideo.src = liveVideoUrl(photo.videoFilename);
     liveVideo.currentTime = 0;
     liveVideo.play();
     liveVideo.classList.add('playing');

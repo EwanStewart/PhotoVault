@@ -21,7 +21,7 @@ def test_pairs_by_content_identifier():
         entry('/p/clip.mov', content_id='UUID-1', creation='2026:07:04 20:00:00+01:00'),
     ]
 
-    pairs = live_photos._build_pairs(entries)
+    pairs = live_photos._build_pairs(entries, '/p')
 
     assert pairs == {'a.heic': 'clip.mov'}
 
@@ -32,7 +32,7 @@ def test_pairs_by_capture_time_within_tolerance():
         entry('/p/clip.mov', creation='2026:07:04 13:09:16+01:00'),
     ]
 
-    pairs = live_photos._build_pairs(entries)
+    pairs = live_photos._build_pairs(entries, '/p')
 
     assert pairs == {'a.heic': 'clip.mov'}
 
@@ -43,7 +43,7 @@ def test_no_pair_outside_tolerance():
         entry('/p/clip.mov', creation='2026:07:04 13:10:18+01:00'),
     ]
 
-    pairs = live_photos._build_pairs(entries)
+    pairs = live_photos._build_pairs(entries, '/p')
 
     assert pairs == {}
 
@@ -55,7 +55,7 @@ def test_video_pairs_with_nearest_photo_only():
         entry('/p/clip.mov', creation='2026:07:04 13:09:18'),
     ]
 
-    pairs = live_photos._build_pairs(entries)
+    pairs = live_photos._build_pairs(entries, '/p')
 
     assert pairs == {'near.heic': 'clip.mov'}
 
@@ -67,7 +67,7 @@ def test_content_identifier_beats_capture_time():
         entry('/p/clip.mov', content_id='UUID-1', creation='2026:07:04 13:09:18'),
     ]
 
-    pairs = live_photos._build_pairs(entries)
+    pairs = live_photos._build_pairs(entries, '/p')
 
     assert pairs == {'a.heic': 'clip.mov'}
 

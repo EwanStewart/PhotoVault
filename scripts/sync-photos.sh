@@ -21,7 +21,7 @@ fi
 log "Starting photo sync..."
 
 # Run rclone sync
-if rclone sync gdrive:PhotoFrame "$PHOTOS_DIR" --exclude ".*" --exclude "*.tmp" 2>&1 | tee -a "$LOG_FILE"; then
+if rclone sync gdrive:PhotoFrame "$PHOTOS_DIR" --track-renames --exclude ".*" --exclude "*.tmp" 2>&1 | tee -a "$LOG_FILE"; then
     # Count photos (including HEIC)
     PHOTO_COUNT=$(find "$PHOTOS_DIR" -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.png" -o -iname "*.gif" -o -iname "*.webp" -o -iname "*.bmp" -o -iname "*.heic" \) | wc -l)
 

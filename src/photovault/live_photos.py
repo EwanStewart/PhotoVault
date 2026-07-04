@@ -27,7 +27,7 @@ _cache = {'signature': None, 'pairs': {}}
 def _scan_metadata(photos_dir):
     """Run one exiftool pass over the directory reading pairing fields."""
     command = [
-        'exiftool', '-json',
+        'exiftool', '-json', '-r',
         '-ContentIdentifier', '-CreationDate', '-DateTimeOriginal',
         photos_dir,
     ]
@@ -54,12 +54,15 @@ def _parse_timestamp(value):
     return result
 
 
-def _split_entries(entries):
-    """Split an exiftool scan into photo and video records."""
+def _split_entries(entries, photos_dir):
+    """Split an exiftool scan into photo and video records keyed by relative path."""
     photos = []
     videos = []
     for item in entries:
-        filename = os.path.basename(item.get('SourceFile', ''))
+        source_file = item.get('SourceFile')
+        if not source_file:
+            continue
+        filename = os.path.relpath(source_file, photos_dir)
         ext = os.path.splitext(filename)[1].lower()
         record = {
             'filename': filename,
@@ -103,9 +106,9 @@ def _pair_by_capture_time(photos, videos, pairs, used):
             used.add(video_name)
 
 
-def _build_pairs(entries):
+def _build_pairs(entries, photos_dir):
     """Match each video to at most one photo: exact id first, then capture time."""
-    photos, videos = _split_entries(entries)
+    photos, videos = _split_entries(entries, photos_dir)
     pairs = {}
     used = set()
     _pair_by_content_id(photos, videos, pairs, used)
@@ -114,13 +117,15 @@ def _build_pairs(entries):
 
 
 def _directory_signature(photos_dir):
-    """Names and mtimes of every file in the photos directory."""
+    """Relative paths and mtimes of every file under the photos directory."""
     signature = ()
     try:
-        with os.scandir(photos_dir) as it:
-            signature = tuple(sorted(
-                (item.name, item.stat().st_mtime) for item in it if item.is_file()
-            ))
+        entries = []
+        for root, _, files in os.walk(photos_dir):
+            for name in files:
+                path = os.path.join(root, name)
+                entries.append((os.path.relpath(path, photos_dir), os.path.getmtime(path)))
+        signature = tuple(sorted(entries))
     except OSError:
         signature = ()
     return signature
@@ -134,7 +139,7 @@ def find_paired_video(photos_dir, photo_filename):
             os.path.splitext(name)[1].lower() in VIDEO_EXTENSIONS
             for name, _ in signature
         )
-        _cache['pairs'] = _build_pairs(_scan_metadata(photos_dir)) if has_videos else {}
+        _cache['pairs'] = _build_pairs(_scan_metadata(photos_dir), photos_dir) if has_videos else {}
         _cache['signature'] = signature
         if _cache['pairs']:
             logger.info("Live Photo pairs: %s", _cache['pairs'])
