@@ -72,7 +72,6 @@ const locationBadge = document.getElementById('location-badge');
 const locationText = document.getElementById('location-text');
 const locationFlag = document.getElementById('location-flag');
 const dateBadge = document.getElementById('date-badge');
-const liveIndicator = document.getElementById('live-indicator');
 const liveVideo = document.getElementById('live-video');
 const photoBg = document.getElementById('photo-bg');
 const bulbPanel = document.getElementById('bulb-panel');
@@ -336,10 +335,6 @@ function updatePhotoInfo(photo) {
         dateBadge.classList.remove('visible');
     }
 
-    // Update Live Photo indicator
-    if (liveIndicator) {
-        liveIndicator.classList.toggle('visible', !!photo.isLivePhoto);
-    }
 }
 
 function refreshCurrentPhotoInfo() {
