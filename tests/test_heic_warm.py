@@ -1,4 +1,5 @@
 import threading
+import time
 
 import photovault.main as main
 
@@ -69,6 +70,38 @@ def test_warm_single_video_transcodes_when_cache_is_stale(monkeypatch, tmp_path)
 
     assert len(transcoded) == 1
     assert transcoded[0].endswith('clip.mp4')
+
+
+def test_transcode_video_runs_one_at_a_time(monkeypatch, tmp_path):
+    _, _, video_cache = _use_tmp_dirs(monkeypatch, tmp_path)
+    active = {'now': 0, 'max': 0}
+    counter_lock = threading.Lock()
+
+    def fake_run(command, **kwargs):
+        with counter_lock:
+            active['now'] += 1
+            active['max'] = max(active['max'], active['now'])
+        time.sleep(0.05)
+        with counter_lock:
+            active['now'] -= 1
+        open(command[-1], 'wb').close()
+        return None
+
+    monkeypatch.setattr(main.subprocess, 'run', fake_run)
+
+    threads = [
+        threading.Thread(
+            target=main._transcode_video,
+            args=(f'src{i}.mov', str(video_cache / f'out{i}.mp4')),
+        )
+        for i in range(4)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert active['max'] == 1
 
 
 def test_warm_single_video_skips_fresh_cache(monkeypatch, tmp_path):

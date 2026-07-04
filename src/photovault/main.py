@@ -83,6 +83,7 @@ _photo_enrich_thread = None
 _heic_warm_thread = None
 _heic_locks = {}
 _heic_locks_lock = threading.Lock()
+_transcode_lock = threading.Lock()
 BIND_HOST = os.environ.get('PHOTOVAULT_BIND_HOST', '127.0.0.1')
 SERVE_THREADS = 4
 
@@ -619,9 +620,10 @@ def _transcode_video(source_path, cache_path):
         '-profile:v', 'baseline', '-crf', '23',
         '-an', '-movflags', '+faststart', tmp_path,
     ]
-    subprocess.run(command, capture_output=True,
-                   timeout=VIDEO_TRANSCODE_TIMEOUT_SECONDS, check=True)
-    os.replace(tmp_path, cache_path)
+    with _transcode_lock:
+        subprocess.run(command, capture_output=True,
+                       timeout=VIDEO_TRANSCODE_TIMEOUT_SECONDS, check=True)
+        os.replace(tmp_path, cache_path)
 
 
 def _warm_single_video(filename):
