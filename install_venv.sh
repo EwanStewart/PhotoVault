@@ -6,7 +6,7 @@ VENV_DIR="${SCRIPT_DIR}/venv"
 
 echo "Installing system dependencies"
 sudo apt-get update
-sudo apt-get install -y python3-venv python3-pip libheif-dev
+sudo apt-get install -y python3-venv python3-pip libheif-dev libimage-exiftool-perl
 
 echo "Creating virtual environment"
 python3 -m venv "${VENV_DIR}"

@@ -9,6 +9,7 @@ import urllib.error
 from pathlib import Path
 import waitress
 from flask import Flask, render_template, jsonify, send_from_directory, redirect, request, send_file
+import photovault.live_photos as live_photos
 from photovault.spotify_client import SpotifyClient
 from photovault.tapo_client import TapoBulbClient, COLOUR_PRESETS
 import pycountry
@@ -69,6 +70,7 @@ _geocode_save_timer = None
 _geocode_save_lock = threading.Lock()
 _photo_cache = []
 _photo_cache_fileset = set()
+_video_fileset = set()
 _photo_cache_lock = threading.Lock()
 _photo_enrich_thread = None
 _heic_warm_thread = None
@@ -380,13 +382,17 @@ def reverse_geocode(lat, lon):
 
 
 def find_live_photo_video(photo_path):
-    """Check if a matching MOV file exists for Live Photo."""
+    """Find the video half of a Live Photo: matching basename first, then metadata."""
     base_name = os.path.splitext(photo_path)[0]
+    result = None
     for ext in ['.MOV', '.mov']:
         video_path = base_name + ext
         if os.path.exists(video_path):
-            return os.path.basename(video_path)
-    return None
+            result = os.path.basename(video_path)
+            break
+    if result is None:
+        result = live_photos.find_paired_video(PHOTOS_DIR, os.path.basename(photo_path))
+    return result
 
 
 @app.route('/')
@@ -480,7 +486,7 @@ def _start_enrich_thread_if_idle():
 
 def refresh_photo_cache():
     """Sync the photo cache file set; metadata enrichment runs in the background."""
-    global _photo_cache, _photo_cache_fileset
+    global _photo_cache, _photo_cache_fileset, _video_fileset
 
     if not os.path.exists(PHOTOS_DIR):
         with _photo_cache_lock:
@@ -489,6 +495,7 @@ def refresh_photo_cache():
         return
 
     current_files = set()
+    current_videos = set()
     with os.scandir(PHOTOS_DIR) as it:
         for entry in it:
             if not entry.is_file():
@@ -496,9 +503,12 @@ def refresh_photo_cache():
             ext = os.path.splitext(entry.name)[1].lower()
             if ext in ALLOWED_EXTENSIONS:
                 current_files.add(entry.name)
+            elif ext in VIDEO_EXTENSIONS:
+                current_videos.add(entry.name)
 
     with _photo_cache_lock:
-        if current_files == _photo_cache_fileset:
+        videos_changed = current_videos != _video_fileset
+        if current_files == _photo_cache_fileset and not videos_changed:
             return
 
         added = current_files - _photo_cache_fileset
@@ -509,6 +519,13 @@ def refresh_photo_cache():
 
         for filename in added:
             _photo_cache.append(_build_photo_stub(filename))
+
+        if videos_changed:
+            # A late-arriving clip may belong to an already-enriched photo
+            for photo in _photo_cache:
+                if not photo.get('isLivePhoto'):
+                    photo['_enriched'] = False
+            _video_fileset = current_videos
 
         _photo_cache.sort(key=lambda x: x['modified'], reverse=True)
         _photo_cache_fileset = current_files
