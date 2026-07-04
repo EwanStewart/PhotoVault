@@ -194,6 +194,8 @@ async function loadPhotos() {
         const currentNames = photoFilenames(state.photos);
 
         if (!initial && sameFilenameSet(incomingNames, currentNames)) {
+            state.photos = mergePhotoMetadata(state.photos, data);
+            refreshCurrentPhotoInfo();
             return;
         }
 
@@ -340,6 +342,16 @@ function updatePhotoInfo(photo) {
     // Update Live Photo indicator
     if (liveIndicator) {
         liveIndicator.classList.toggle('visible', !!photo.isLivePhoto);
+    }
+}
+
+function refreshCurrentPhotoInfo() {
+    if (state.currentPhoto) {
+        const updated = state.photos.find(p => p.filename === state.currentPhoto.filename);
+        if (updated && updated !== state.currentPhoto) {
+            state.currentPhoto = updated;
+            updatePhotoInfo(updated);
+        }
     }
 }
 
