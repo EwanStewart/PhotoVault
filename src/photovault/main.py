@@ -402,18 +402,9 @@ def reverse_geocode(lat, lon):
 
 
 def find_live_photo_video(photo_path):
-    """Find the video half of a Live Photo: matching basename first, then metadata."""
-    base_name = os.path.splitext(photo_path)[0]
-    result = None
-    for ext in ['.MOV', '.mov']:
-        video_path = base_name + ext
-        if os.path.exists(video_path):
-            result = os.path.relpath(video_path, PHOTOS_DIR)
-            break
-    if result is None:
-        result = live_photos.find_paired_video(
-            PHOTOS_DIR, os.path.relpath(photo_path, PHOTOS_DIR))
-    return result
+    """Find the video half of a Live Photo, corroborating any match by metadata."""
+    return live_photos.find_paired_video(
+        PHOTOS_DIR, os.path.relpath(photo_path, PHOTOS_DIR))
 
 
 @app.route('/')

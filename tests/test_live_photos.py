@@ -72,6 +72,61 @@ def test_content_identifier_beats_capture_time():
     assert pairs == {'a.heic': 'clip.mov'}
 
 
+def test_same_basename_pairs_when_content_ids_match():
+    entries = [
+        entry('/p/IMG_1.heic', content_id='UUID-1', taken='2026:07:04 13:09:18'),
+        entry('/p/IMG_1.mov', content_id='UUID-1', creation='2026:07:04 13:09:18'),
+    ]
+
+    pairs = live_photos._build_pairs(entries, '/p')
+
+    assert pairs == {'IMG_1.heic': 'IMG_1.mov'}
+
+
+def test_same_basename_pairs_when_video_has_no_content_id():
+    entries = [
+        entry('/p/IMG_1.heic', content_id='UUID-1', taken='2026:07:04 13:09:18'),
+        entry('/p/IMG_1.mov', creation='2026:07:04 13:09:18+01:00'),
+    ]
+
+    pairs = live_photos._build_pairs(entries, '/p')
+
+    assert pairs == {'IMG_1.heic': 'IMG_1.mov'}
+
+
+def test_same_basename_not_paired_when_content_ids_conflict():
+    entries = [
+        entry('/p/IMG_1.heic', content_id='UUID-1', taken='2025:12:12 18:22:15'),
+        entry('/p/IMG_1.mov', content_id='UUID-2', creation='2026:05:27 19:58:27'),
+    ]
+
+    pairs = live_photos._build_pairs(entries, '/p')
+
+    assert pairs == {}
+
+
+def test_same_basename_not_paired_when_capture_times_far_apart():
+    entries = [
+        entry('/p/IMG_1.heic', taken='2025:12:12 18:22:15'),
+        entry('/p/IMG_1.mov', creation='2026:05:27 19:58:27'),
+    ]
+
+    pairs = live_photos._build_pairs(entries, '/p')
+
+    assert pairs == {}
+
+
+def test_orphan_clip_does_not_steal_an_unrelated_photo():
+    entries = [
+        entry('/p/IMG_1.heic', content_id='UUID-1', taken='2026:05:27 19:58:20'),
+        entry('/p/IMG_2.mov', content_id='UUID-9', creation='2026:05:27 19:58:27'),
+    ]
+
+    pairs = live_photos._build_pairs(entries, '/p')
+
+    assert pairs == {}
+
+
 def test_parse_timestamp_ignores_timezone_suffix():
     parsed = live_photos._parse_timestamp('2026:07:04 13:09:18+01:00')
 
@@ -120,17 +175,16 @@ def test_find_live_photo_video_falls_back_to_matcher(monkeypatch, tmp_path):
     assert main.find_live_photo_video(str(photo)) == 'clip.mov'
 
 
-def test_basename_match_wins_over_matcher(monkeypatch, tmp_path):
-    photo = tmp_path / 'a.heic'
-    photo.write_bytes(b'heic')
-    (tmp_path / 'a.mov').write_bytes(b'mov')
-    monkeypatch.setattr(main, 'PHOTOS_DIR', str(tmp_path))
-    monkeypatch.setattr(
-        main.live_photos, 'find_paired_video',
-        lambda photos_dir, name: 'wrong.mov'
-    )
+def test_basename_preferred_over_closer_capture_time():
+    entries = [
+        entry('/p/IMG_1.heic', taken='2026:07:04 13:09:20'),
+        entry('/p/IMG_1.mov', creation='2026:07:04 13:09:18'),
+        entry('/p/OTHER.mov', creation='2026:07:04 13:09:20'),
+    ]
 
-    assert main.find_live_photo_video(str(photo)) == 'a.mov'
+    pairs = live_photos._build_pairs(entries, '/p')
+
+    assert pairs == {'IMG_1.heic': 'IMG_1.mov'}
 
 
 def test_new_video_triggers_re_enrichment(monkeypatch, tmp_path):

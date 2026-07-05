@@ -1,11 +1,13 @@
 """Pair Live Photo stills with separately exported video clips.
 
-Apple stores a Live Photo as a still plus a MOV clip. Exports often
-rename the clip, so basename matching fails. Both halves usually share
-a content identifier; failing that, their capture times sit within a
-few seconds of each other. One exiftool pass over the photos directory
-reads both fields for every file, and the result is cached until the
-directory contents change.
+Apple stores a Live Photo as a still plus a MOV clip. The two usually
+share a basename, but the iPhone recycles file numbers, so a still and
+an unrelated clip can collide on name. Matching runs in three tiers:
+same basename first, then a shared content identifier, then the nearest
+capture time within a few seconds. Every tier refuses a pair whose two
+halves carry different content identifiers, which is how a recycled-name
+collision is rejected. One exiftool pass over the photos directory reads
+both fields for every file, cached until the directory contents change.
 """
 
 import json
@@ -78,10 +80,46 @@ def _split_entries(entries, photos_dir):
     return photos, videos
 
 
+def _content_ids_conflict(photo, video):
+    """True when both files carry content identifiers and they differ."""
+    photo_id = photo['content_id']
+    video_id = video['content_id']
+    return bool(photo_id and video_id and photo_id != video_id)
+
+
+def _basename_consistent(photo, video):
+    """True unless metadata proves a same-name photo and video are unrelated."""
+    consistent = True
+    if _content_ids_conflict(photo, video):
+        consistent = False
+    elif photo['taken'] and video['taken']:
+        delta = abs((photo['taken'] - video['taken']).total_seconds())
+        consistent = delta <= MATCH_TOLERANCE_SECONDS
+    return consistent
+
+
+def _pair_by_basename(photos, videos, pairs, used):
+    """Pair a photo to a same-name video unless metadata contradicts it."""
+    videos_by_stem = {}
+    for video in videos:
+        stem = os.path.splitext(video['filename'])[0]
+        videos_by_stem.setdefault(stem, []).append(video)
+    for photo in photos:
+        stem = os.path.splitext(photo['filename'])[0]
+        for video in videos_by_stem.get(stem, []):
+            free = video['filename'] not in used and photo['filename'] not in pairs
+            if free and _basename_consistent(photo, video):
+                pairs[photo['filename']] = video['filename']
+                used.add(video['filename'])
+                break
+
+
 def _pair_by_content_id(photos, videos, pairs, used):
     """Pair photos to videos sharing the same Apple content identifier."""
     videos_by_id = {v['content_id']: v['filename'] for v in videos if v['content_id']}
     for photo in photos:
+        if photo['filename'] in pairs:
+            continue
         video_name = videos_by_id.get(photo['content_id'])
         if photo['content_id'] and video_name and video_name not in used:
             pairs[photo['filename']] = video_name
@@ -95,7 +133,7 @@ def _pair_by_capture_time(photos, videos, pairs, used):
         if photo['filename'] in pairs or photo['taken'] is None:
             continue
         for video in videos:
-            if video['taken'] is None:
+            if video['taken'] is None or _content_ids_conflict(photo, video):
                 continue
             delta = abs((photo['taken'] - video['taken']).total_seconds())
             if delta <= MATCH_TOLERANCE_SECONDS:
@@ -111,6 +149,7 @@ def _build_pairs(entries, photos_dir):
     photos, videos = _split_entries(entries, photos_dir)
     pairs = {}
     used = set()
+    _pair_by_basename(photos, videos, pairs, used)
     _pair_by_content_id(photos, videos, pairs, used)
     _pair_by_capture_time(photos, videos, pairs, used)
     return pairs
