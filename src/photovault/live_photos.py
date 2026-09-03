@@ -170,8 +170,15 @@ def _directory_signature(photos_dir):
     return signature
 
 
-def find_paired_video(photos_dir, photo_filename):
-    """Return the video filename paired with the photo, or None."""
+def pair_map(photos_dir):
+    """Every Live Photo pair under the directory, keyed by the still.
+
+    One exiftool pass covers the whole directory, so callers enriching
+    many photos should take this map once rather than ask per photo.
+
+    @param photos_dir Root of the photos directory
+    @returns Mapping of each still's relative path to its clip's
+    """
     signature = _directory_signature(photos_dir)
     if signature != _cache['signature']:
         has_videos = any(
@@ -181,5 +188,15 @@ def find_paired_video(photos_dir, photo_filename):
         _cache['pairs'] = _build_pairs(_scan_metadata(photos_dir), photos_dir) if has_videos else {}
         _cache['signature'] = signature
         if _cache['pairs']:
-            logger.info("Live Photo pairs: %s", _cache['pairs'])
-    return _cache['pairs'].get(photo_filename)
+            logger.info("Matched %d Live Photo pairs", len(_cache['pairs']))
+    return _cache['pairs']
+
+
+def find_paired_video(photos_dir, photo_filename):
+    """Return the video filename paired with the photo, or None.
+
+    @param photos_dir Root of the photos directory
+    @param photo_filename Photos-relative path of the still
+    @returns The clip's relative path, or None when the still has no pair
+    """
+    return pair_map(photos_dir).get(photo_filename)

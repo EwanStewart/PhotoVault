@@ -88,6 +88,8 @@ PHOTO_PREFS_FILE = str(REPO_ROOT / 'photo_prefs.json')
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 MANAGE_SESSION_LIFETIME = timedelta(days=30)
 GEOCODE_SAVE_DEBOUNCE_SECONDS = 5.0
+PAIR_MAP_MAX_AGE_SECONDS = 30.0
+UPLOAD_SETTLE_SECONDS = 6.0
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.heic'}
 VIDEO_EXTENSIONS = {'.mov'}
 
@@ -106,6 +108,10 @@ _photo_cache_fileset = set()
 _video_fileset = set()
 _photo_cache_lock = threading.Lock()
 _photo_enrich_thread = None
+_pair_map_cache = {'pairs': {}, 'checked_at': 0.0}
+_pair_map_lock = threading.Lock()
+_upload_settle_timer = None
+_upload_settle_lock = threading.Lock()
 _heic_warm_thread = None
 _heic_locks = {}
 _heic_locks_lock = threading.Lock()
@@ -431,8 +437,30 @@ def index():
     return render_template('index.html')
 
 
-def build_photo_data(filename):
-    """Build metadata dict for a single photo file."""
+def _current_pair_map():
+    """Live Photo pairs for the library, rescanned at most twice a minute.
+
+    Pairing runs one exiftool pass over the whole photos directory,
+    which takes tens of seconds on a Pi. Asking per photo made a batch
+    upload rescan the library once for every file it added.
+
+    @returns Mapping of each still's relative path to its clip's
+    """
+    now = time.monotonic()
+    with _pair_map_lock:
+        if now - _pair_map_cache['checked_at'] >= PAIR_MAP_MAX_AGE_SECONDS:
+            _pair_map_cache['pairs'] = live_photos.pair_map(PHOTOS_DIR)
+            _pair_map_cache['checked_at'] = now
+        return _pair_map_cache['pairs']
+
+
+def build_photo_data(filename, pairs=None):
+    """Build metadata dict for a single photo file.
+
+    @param filename Photos-relative path of the photo
+    @param pairs Shared Live Photo pair map, or None to look the photo up alone
+    @returns Metadata dict for the photo
+    """
     filepath = os.path.join(PHOTOS_DIR, filename)
     photo_data = None
 
@@ -460,7 +488,10 @@ def build_photo_data(filename):
                     if location_data.get('country_code'):
                         photo_data['country_code'] = location_data['country_code']
 
-        video_filename = find_live_photo_video(filepath)
+        if pairs is None:
+            video_filename = find_live_photo_video(filepath)
+        else:
+            video_filename = pairs.get(filename)
         if video_filename:
             photo_data['isLivePhoto'] = True
             photo_data['videoFilename'] = video_filename
@@ -503,7 +534,7 @@ def _enrich_pending_photos():
         if target is None:
             break
 
-        enriched = build_photo_data(target['filename'])
+        enriched = build_photo_data(target['filename'], _current_pair_map())
         with _photo_cache_lock:
             for i, photo in enumerate(_photo_cache):
                 if photo['filename'] == target['filename']:
@@ -1049,6 +1080,29 @@ def manage_delete_photo(filename):
     return response
 
 
+def _refresh_after_uploads():
+    """Rescan the library once a burst of uploads has settled."""
+    refresh_photo_cache()
+    _start_heic_warm_thread_if_idle()
+
+
+def _schedule_library_refresh():
+    """Coalesce the rescan a burst of uploads needs into one pass.
+
+    Each rescan re-enriches the library and can trigger a fresh exiftool
+    pass, so doing it per uploaded file saturated the frame when sending
+    a batch from the phone.
+    """
+    global _upload_settle_timer
+    with _upload_settle_lock:
+        if _upload_settle_timer is not None:
+            _upload_settle_timer.cancel()
+        timer = threading.Timer(UPLOAD_SETTLE_SECONDS, _refresh_after_uploads)
+        timer.daemon = True
+        _upload_settle_timer = timer
+        timer.start()
+
+
 def _upload_lone_clip(video):
     """Store a clip that arrived without its still, or explain the refusal.
 
@@ -1059,8 +1113,7 @@ def _upload_lone_clip(video):
     if video is not None and video.filename:
         try:
             stored = uploads.save_clip(PHOTOS_DIR, PHOTO_REMOTE, video)
-            refresh_photo_cache()
-            _start_heic_warm_thread_if_idle()
+            _schedule_library_refresh()
             response = (jsonify(stored), 201)
         except uploads.RejectedUpload as e:
             response = (jsonify({'error': str(e)}), 400)
@@ -1087,8 +1140,7 @@ def upload_photo():
             logger.error("Upload of %s failed: %s", photo.filename, e)
             response = (jsonify({'error': f'Upload failed: {e}'}), 502)
         if response is None:
-            refresh_photo_cache()
-            _start_heic_warm_thread_if_idle()
+            _schedule_library_refresh()
             response = (jsonify(stored), 201)
     return response
 

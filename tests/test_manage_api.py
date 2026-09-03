@@ -17,6 +17,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(main, 'PHOTO_PREFS_FILE', str(tmp_path / 'prefs.json'))
     monkeypatch.setattr(main, '_photo_prefs', {})
     monkeypatch.setattr(main, '_start_enrich_thread_if_idle', lambda: None)
+    monkeypatch.setattr(main, '_schedule_library_refresh', lambda: None)
     monkeypatch.setattr(main, '_photo_cache', [])
     monkeypatch.setattr(main, '_photo_cache_fileset', set())
     monkeypatch.setattr(main, '_video_fileset', set())
