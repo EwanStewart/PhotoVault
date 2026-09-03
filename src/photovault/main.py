@@ -88,6 +88,8 @@ PHOTO_PREFS_FILE = str(REPO_ROOT / 'photo_prefs.json')
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024
 MANAGE_SESSION_LIFETIME = timedelta(days=30)
 GEOCODE_SAVE_DEBOUNCE_SECONDS = 5.0
+GEOCODE_CACHE_VERSION = 2
+GEOCODE_LANGUAGE = 'en'
 PAIR_MAP_MAX_AGE_SECONDS = 30.0
 UPLOAD_SETTLE_SECONDS = 6.0
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.heic'}
@@ -269,16 +271,38 @@ def get_display_country(country_code, admin1):
     return display_name
 
 
+def _geocode_entries_from_file(stored):
+    """Cached entries from a loaded file, dropping any older format.
+
+    A file without the current version was geocoded before English
+    names were asked for, so its place names are in the local language
+    and have to be fetched again.
+
+    @param stored The parsed cache file contents
+    @returns The usable entries, empty when the file predates this version
+    """
+    entries = {}
+    if isinstance(stored, dict) and stored.get('version') == GEOCODE_CACHE_VERSION:
+        loaded = stored.get('entries')
+        if isinstance(loaded, dict):
+            entries = loaded
+    return entries
+
+
 def load_geocode_cache_from_disk():
     """Load geocode cache from disk into memory at startup."""
     global _geocode_cache
 
+    entries = {}
     try:
         if os.path.exists(GEOCODE_CACHE_FILE):
             with open(GEOCODE_CACHE_FILE, 'r') as f:
-                _geocode_cache = json.load(f)
+                entries = _geocode_entries_from_file(json.load(f))
     except Exception as e:
         logger.warning("Failed to load geocode cache: %s", e)
+    if not entries and os.path.exists(GEOCODE_CACHE_FILE):
+        logger.info("Discarded geocode cache from an older format; place names will refetch")
+    _geocode_cache = entries
 
 
 def save_geocode_cache_to_disk():
@@ -286,7 +310,7 @@ def save_geocode_cache_to_disk():
     try:
         tmp_path = GEOCODE_CACHE_FILE + '.tmp'
         with open(tmp_path, 'w') as f:
-            json.dump(_geocode_cache, f)
+            json.dump({'version': GEOCODE_CACHE_VERSION, 'entries': _geocode_cache}, f)
         os.replace(tmp_path, GEOCODE_CACHE_FILE)
     except Exception as e:
         logger.warning("Failed to save geocode cache: %s", e)
@@ -322,6 +346,22 @@ def get_uk_nation_from_state(state_name):
     return uk_nation
 
 
+def nominatim_url(lat, lon):
+    """Reverse geocoding URL for one point, asking for English place names.
+
+    Nominatim answers in the local language by default, which puts
+    Greek, Czech and Gaelic names on the frame. Asking for English
+    returns the exonym where one exists and the local name otherwise.
+
+    @param lat Latitude in decimal degrees
+    @param lon Longitude in decimal degrees
+    @returns The Nominatim reverse geocoding URL
+    """
+    return ('https://nominatim.openstreetmap.org/reverse'
+            f'?format=json&lat={lat}&lon={lon}&zoom=14&addressdetails=1'
+            f'&accept-language={GEOCODE_LANGUAGE}')
+
+
 def nominatim_reverse_geocode(lat, lon):
     """
     Reverse geocode using Nominatim (OpenStreetMap) API.
@@ -338,7 +378,7 @@ def nominatim_reverse_geocode(lat, lon):
     if elapsed < NOMINATIM_MIN_INTERVAL:
         time.sleep(NOMINATIM_MIN_INTERVAL - elapsed)
 
-    url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&zoom=14&addressdetails=1"
+    url = nominatim_url(lat, lon)
 
     try:
         request_obj = urllib.request.Request(
