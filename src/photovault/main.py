@@ -671,17 +671,36 @@ def _warm_single_video(filename):
         logger.error("Failed to transcode %s: %s", filename, e)
 
 
+def _warm_single_thumbnail(filename):
+    """Build one manage-page preview into the cache if its entry is stale."""
+    filepath = os.path.join(PHOTOS_DIR, filename)
+    cache_path = _thumb_cache_path(filename)
+    try:
+        with _get_heic_lock('thumb:' + filename):
+            if _cache_stale(cache_path, filepath):
+                _make_thumbnail(filepath, cache_path)
+    except Exception as e:
+        logger.error("Failed to warm thumbnail %s: %s", filename, e)
+
+
 def _warm_media_cache():
-    """Background pass: convert stale HEICs and transcode clips for playback."""
+    """Background pass: convert stale HEICs, build previews, transcode clips.
+
+    Decoding a 12 megapixel HEIC takes seconds on a Pi 3B+, so the
+    manage page would crawl on its first visit without this pass.
+    """
     os.makedirs(HEIC_CACHE_DIR, exist_ok=True)
     os.makedirs(VIDEO_CACHE_DIR, exist_ok=True)
+    os.makedirs(THUMB_CACHE_DIR, exist_ok=True)
     refresh_photo_cache()
     with _photo_cache_lock:
-        heic_files = [p['filename'] for p in _photo_cache
-                      if p['filename'].lower().endswith('.heic')]
+        photo_files = [p['filename'] for p in _photo_cache]
+        heic_files = [name for name in photo_files if name.lower().endswith('.heic')]
         video_files = sorted(_video_fileset)
     for filename in heic_files:
         _warm_single_heic(filename)
+    for filename in photo_files:
+        _warm_single_thumbnail(filename)
     for filename in video_files:
         _warm_single_video(filename)
 

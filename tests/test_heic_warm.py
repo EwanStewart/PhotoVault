@@ -2,6 +2,8 @@ import os
 import threading
 import time
 
+from PIL import Image
+
 import photovault.main as main
 
 
@@ -192,3 +194,17 @@ def test_warm_cache_endpoint_reports_started_then_already_running(monkeypatch):
     assert second.get_json()['status'] == 'already_running'
 
     release.set()
+
+
+def test_warm_pass_builds_manage_page_thumbnails(monkeypatch, tmp_path):
+    photos_dir, _, _ = _use_tmp_dirs(monkeypatch, tmp_path)
+    thumb_cache = tmp_path / 'thumb_cache'
+    thumb_cache.mkdir()
+    monkeypatch.setattr(main, 'THUMB_CACHE_DIR', str(thumb_cache))
+    _reset_photo_cache(monkeypatch)
+    monkeypatch.setattr(main, '_video_fileset', set())
+    Image.new('RGB', (900, 600), 'red').save(photos_dir / 'a.jpg', 'JPEG')
+
+    main._warm_media_cache()
+
+    assert (thumb_cache / 'a.jpg').exists()
