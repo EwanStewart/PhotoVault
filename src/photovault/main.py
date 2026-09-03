@@ -678,7 +678,7 @@ def _warm_single_thumbnail(filename):
     try:
         with _get_heic_lock('thumb:' + filename):
             if _cache_stale(cache_path, filepath):
-                _make_thumbnail(filepath, cache_path)
+                _make_thumbnail(_thumbnail_source(filename), cache_path)
     except Exception as e:
         logger.error("Failed to warm thumbnail %s: %s", filename, e)
 
@@ -790,6 +790,25 @@ def _make_thumbnail(source_path, cache_path):
     os.replace(tmp_path, cache_path)
 
 
+def _thumbnail_source(filename):
+    """Best source to build a preview from.
+
+    The converted JPEG is already down to 1600px, so preferring it over
+    the original avoids decoding a 12 megapixel HEIC for a 400px
+    preview. That decode takes over three seconds on a Pi 3B+.
+
+    @param filename Photos-relative path of the photo
+    @returns Path of the file the preview should be built from
+    """
+    original = os.path.join(PHOTOS_DIR, filename)
+    source = original
+    if filename.lower().endswith('.heic'):
+        converted = os.path.join(HEIC_CACHE_DIR, os.path.splitext(filename)[0] + '.jpg')
+        if not _cache_stale(converted, original):
+            source = converted
+    return source
+
+
 def _thumb_cache_path(filename):
     """Cache location of the preview for one photo.
 
@@ -813,7 +832,7 @@ def serve_thumbnail(filename):
             with _get_heic_lock('thumb:' + filename):
                 if _cache_stale(cache_path, filepath):
                     try:
-                        _make_thumbnail(filepath, cache_path)
+                        _make_thumbnail(_thumbnail_source(filename), cache_path)
                     except Exception as e:
                         logger.error("Failed to build thumbnail for %s: %s", filename, e)
                         response = (jsonify({'error': 'Failed to build thumbnail'}), 500)

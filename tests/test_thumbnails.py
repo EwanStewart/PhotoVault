@@ -51,3 +51,37 @@ def test_a_missing_photo_does_not_yield_a_thumbnail(client):
     response = client.get('/photos/thumb/nope.jpg')
 
     assert response.status_code == 500
+
+
+def test_a_heic_preview_builds_from_the_converted_jpeg_when_one_is_cached(monkeypatch, tmp_path):
+    photos_dir = tmp_path / 'photos'
+    heic_cache = tmp_path / 'heic'
+    photos_dir.mkdir()
+    heic_cache.mkdir()
+    monkeypatch.setattr(main, 'PHOTOS_DIR', str(photos_dir))
+    monkeypatch.setattr(main, 'HEIC_CACHE_DIR', str(heic_cache))
+    (photos_dir / 'a.heic').write_bytes(b'original heic')
+    _write_photo(heic_cache / 'a.jpg')
+
+    assert main._thumbnail_source('a.heic') == str(heic_cache / 'a.jpg')
+
+
+def test_a_heic_preview_falls_back_to_the_original_when_no_jpeg_is_cached(monkeypatch, tmp_path):
+    photos_dir = tmp_path / 'photos'
+    heic_cache = tmp_path / 'heic'
+    photos_dir.mkdir()
+    heic_cache.mkdir()
+    monkeypatch.setattr(main, 'PHOTOS_DIR', str(photos_dir))
+    monkeypatch.setattr(main, 'HEIC_CACHE_DIR', str(heic_cache))
+    (photos_dir / 'a.heic').write_bytes(b'original heic')
+
+    assert main._thumbnail_source('a.heic') == str(photos_dir / 'a.heic')
+
+
+def test_a_jpeg_preview_builds_from_the_original(monkeypatch, tmp_path):
+    photos_dir = tmp_path / 'photos'
+    photos_dir.mkdir()
+    monkeypatch.setattr(main, 'PHOTOS_DIR', str(photos_dir))
+    _write_photo(photos_dir / 'a.jpg')
+
+    assert main._thumbnail_source('a.jpg') == str(photos_dir / 'a.jpg')
