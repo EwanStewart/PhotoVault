@@ -7,6 +7,7 @@ __pycache__/
 cache/
 photos/
 geocode_cache.json
+photo_prefs.json
 .secret_key
 sync.log
 *.log
