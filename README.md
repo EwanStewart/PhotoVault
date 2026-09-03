@@ -66,3 +66,20 @@ Once a photo's location is known from its EXIF GPS, the app moves it into a fold
 rclone config              # create remote "gdrive", type Google Drive
 ./scripts/sync-photos.sh   # run once manually for the first sync
 ```
+
+## Uploading from your phone
+
+PhotoVault accepts photos sent straight from an iPhone. They land in the same Google Drive folder as everything else, so the frame picks them up on the next sync. An iOS Shortcut does the sending, because Safari cannot hand a Live Photo's video to a web page. The Shortcut reads both halves of a Live Photo and posts them together.
+
+A page at `http://<pi>:5000/manage` curates the library from your phone. It shows every photo as a grid of previews. Each photo can be switched in or out of the slideshow, or deleted from Google Drive along with its clip. A photo switched off stays on Drive and can be switched back on later. The flags live in `photo_prefs.json` and key on each filename, so they survive the move into a location folder.
+
+Two settings turn this on:
+
+```bash
+PHOTOVAULT_BIND_HOST=0.0.0.0   # put the app on the home network
+PHOTOVAULT_PIN=your_pin_here   # guards every write from the network
+```
+
+The PIN guards uploads, the manage page, and the existing brightness, volume and bulb endpoints. Requests from the Pi itself skip it, so the kiosk keeps working untouched. With no PIN set, nothing off the Pi can write. Uploads reach Drive before they appear locally, because the sync deletes any local file that Drive does not hold.
+
+See [docs/ios-upload-shortcut.md](docs/ios-upload-shortcut.md) for the Shortcut recipe and the manage page in detail.
