@@ -85,3 +85,31 @@ def test_a_jpeg_preview_builds_from_the_original(monkeypatch, tmp_path):
     _write_photo(photos_dir / 'a.jpg')
 
     assert main._thumbnail_source('a.jpg') == str(photos_dir / 'a.jpg')
+
+
+def _write_rotated_photo(path, orientation, size=(900, 600)):
+    """Save a landscape photo whose EXIF asks the viewer to rotate it."""
+    img = Image.new('RGB', size, 'white')
+    img.paste(Image.new('RGB', (120, 120), 'red'), (0, 0))
+    exif = img.getexif()
+    exif[274] = orientation
+    img.save(path, 'JPEG', exif=exif)
+
+
+def test_a_sideways_photo_yields_an_upright_preview(client):
+    _write_rotated_photo(client.photos_dir / 'sideways.jpg', 6)
+
+    client.get('/photos/thumb/sideways.jpg')
+
+    with Image.open(main._thumb_cache_path('sideways.jpg')) as thumb:
+        assert thumb.height > thumb.width
+
+
+def test_an_upside_down_photo_is_turned_the_right_way_up(client):
+    _write_rotated_photo(client.photos_dir / 'flipped.jpg', 3)
+
+    client.get('/photos/thumb/flipped.jpg')
+
+    with Image.open(main._thumb_cache_path('flipped.jpg')) as thumb:
+        corner = thumb.convert('RGB').getpixel((thumb.width - 4, thumb.height - 4))
+        assert corner[0] > 150 and corner[1] < 110

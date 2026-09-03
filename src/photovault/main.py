@@ -21,7 +21,7 @@ import photovault.photo_organiser as photo_organiser
 from photovault.spotify_client import SpotifyClient
 from photovault.tapo_client import TapoBulbClient, COLOUR_PRESETS
 import pycountry
-from PIL import Image
+from PIL import Image, ImageOps
 from pillow_heif import register_heif_opener
 
 # Register HEIF/HEIC opener with Pillow
@@ -611,7 +611,8 @@ def _cache_stale(cache_path, source_path):
 
 def _convert_heic(source_path, cache_path):
     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-    with Image.open(source_path) as img:
+    with Image.open(source_path) as opened:
+        img = ImageOps.exif_transpose(opened)
         if img.mode in ('RGBA', 'P'):
             img = img.convert('RGB')
         img.thumbnail((HEIC_MAX_DIMENSION, HEIC_MAX_DIMENSION), Image.Resampling.LANCZOS)
@@ -777,11 +778,17 @@ def serve_video(filename):
 def _make_thumbnail(source_path, cache_path):
     """Write a small JPEG preview of one photo for the manage grid.
 
+    A phone records a rotated photo as landscape pixels plus an EXIF
+    orientation tag. The frame serves the original, so the browser
+    applies that tag itself. Re-encoding for the preview drops the tag,
+    so the rotation is baked into the pixels here instead.
+
     @param source_path Path of the full-size photo
     @param cache_path Path the preview is written to
     """
     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-    with Image.open(source_path) as img:
+    with Image.open(source_path) as opened:
+        img = ImageOps.exif_transpose(opened)
         if img.mode in ('RGBA', 'P'):
             img = img.convert('RGB')
         img.thumbnail((THUMB_MAX_DIMENSION, THUMB_MAX_DIMENSION), Image.Resampling.LANCZOS)
