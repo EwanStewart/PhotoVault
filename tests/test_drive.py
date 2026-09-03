@@ -50,3 +50,18 @@ def test_run_raises_with_rclone_own_error(monkeypatch):
 
     with pytest.raises(RuntimeError, match='directory not found'):
         drive.run_rclone(['deletefile', 'gdrive:PhotoFrame/a.heic'])
+
+
+def test_remove_empty_dirs_sweeps_the_whole_remote_but_keeps_the_root():
+    calls = []
+
+    drive.remove_empty_dirs('gdrive:PhotoFrame', run=_record(calls))
+
+    assert calls == [['rmdirs', '--leave-root', 'gdrive:PhotoFrame']]
+
+
+def test_remove_empty_dirs_tolerates_a_failure():
+    def failing(args):
+        raise RuntimeError('rate limited')
+
+    drive.remove_empty_dirs('gdrive:PhotoFrame', run=failing)

@@ -65,6 +65,22 @@ def remove_empty_dir(remote, path, run=run_rclone):
             logger.debug("Left %s in place on the remote: %s", path, e)
 
 
+def remove_empty_dirs(remote, run=run_rclone):
+    """Sweep every empty folder from the remote, keeping the root.
+
+    A location rename moves files out of their old folder over several
+    passes, so the folder is rarely empty at the moment any one file
+    leaves. One sweep afterwards catches whatever ended up empty.
+
+    @param remote The rclone remote root, such as gdrive:PhotoFrame
+    @param run Command runner, injectable for tests
+    """
+    try:
+        run(['rmdirs', '--leave-root', remote])
+    except Exception as e:
+        logger.warning("Could not sweep empty folders on %s: %s", remote, e)
+
+
 def parent_folder(path):
     """Remote-relative folder holding a file, or an empty string at the root.
 

@@ -62,35 +62,21 @@ def _run_rclone(args):
         raise RuntimeError(detail)
 
 
-def _emptied_folders(moves):
-    """Folders the moves may have emptied, deepest first.
-
-    Renaming a location, as happens when a place name is refetched in
-    English, leaves the old folder behind holding nothing.
-
-    @param moves Source and destination pairs that were moved
-    @returns Folder paths to try removing, deepest first
-    """
-    folders = set()
-    for source, _ in moves:
-        folder = os.path.dirname(source)
-        while folder:
-            folders.add(folder)
-            folder = os.path.dirname(folder)
-    return sorted(folders, key=lambda path: path.count('/'), reverse=True)
-
-
 def organise(remote, photos):
-    """Move located root-level photos into location folders on the remote."""
-    moves = plan_moves(photos)
+    """Move located root-level photos into location folders on the remote.
+
+    A location whose name changes, as happens when a place name is
+    refetched in English, empties its old folder over several passes.
+    One sweep after the moves clears whatever is left behind.
+    """
     moved = 0
-    for source, destination in moves:
+    for source, destination in plan_moves(photos):
         try:
             _run_rclone(['moveto', f'{remote}/{source}', f'{remote}/{destination}'])
             logger.info("Moved %s to %s on Drive", source, destination)
             moved += 1
         except Exception as e:
             logger.error("Failed to move %s on Drive: %s", source, e)
-    for folder in _emptied_folders(moves):
-        drive.remove_empty_dir(remote, folder)
+    if moved:
+        drive.remove_empty_dirs(remote)
     return moved
