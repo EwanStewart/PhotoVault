@@ -115,3 +115,32 @@ def test_run_rclone_surfaces_the_rclone_error(monkeypatch):
         raised = 'insufficient permission' in str(e)
 
     assert raised
+
+
+def test_folders_a_move_empties_are_tidied_away(monkeypatch):
+    """A renamed location leaves its old folder behind on Drive."""
+    photos = [{
+        'filename': 'Γουβιά, Greece/IMG_1/IMG_1.heic',
+        'location': 'Gouvia, Greece',
+        'videoFilename': 'Γουβιά, Greece/IMG_1/IMG_1.mov',
+    }]
+    monkeypatch.setattr(organiser, '_run_rclone', lambda args: None)
+    tidied = []
+    monkeypatch.setattr(organiser.drive, 'remove_empty_dir',
+                        lambda remote, path: tidied.append(path))
+
+    organiser.organise('gdrive:PhotoFrame', photos)
+
+    assert tidied == ['Γουβιά, Greece/IMG_1', 'Γουβιά, Greece']
+
+
+def test_a_photo_already_in_place_tidies_nothing(monkeypatch):
+    photos = [{'filename': 'Gouvia, Greece/a.heic', 'location': 'Gouvia, Greece'}]
+    monkeypatch.setattr(organiser, '_run_rclone', lambda args: None)
+    tidied = []
+    monkeypatch.setattr(organiser.drive, 'remove_empty_dir',
+                        lambda remote, path: tidied.append(path))
+
+    organiser.organise('gdrive:PhotoFrame', photos)
+
+    assert tidied == []
