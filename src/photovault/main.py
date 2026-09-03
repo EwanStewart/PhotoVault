@@ -755,6 +755,68 @@ def _warm_single_thumbnail(filename):
         logger.error("Failed to warm thumbnail %s: %s", filename, e)
 
 
+def _library_stems():
+    """Relative paths without extensions for every photo and clip stored.
+
+    A cache entry is named after its source's stem, so this is what
+    decides whether an entry still has a photo behind it.
+
+    @returns Set of extension-free relative paths
+    """
+    stems = set()
+    for root, _, files in os.walk(PHOTOS_DIR):
+        for name in files:
+            extension = os.path.splitext(name)[1].lower()
+            if extension in ALLOWED_EXTENSIONS or extension in VIDEO_EXTENSIONS:
+                rel_path = os.path.relpath(os.path.join(root, name), PHOTOS_DIR)
+                stems.add(os.path.splitext(rel_path)[0])
+    return stems
+
+
+def _prune_cache_dir(cache_dir, stems):
+    """Delete cache entries under one directory whose source is gone.
+
+    @param cache_dir Directory holding derived files
+    @param stems Extension-free relative paths of the stored library
+    @returns Count of files removed
+    """
+    removed = 0
+    for root, _, files in os.walk(cache_dir):
+        for name in files:
+            path = os.path.join(root, name)
+            rel_path = os.path.relpath(path, cache_dir)
+            if os.path.splitext(rel_path)[0] not in stems:
+                _remove_quietly(path)
+                removed += 1
+    for root, dirs, _ in os.walk(cache_dir, topdown=False):
+        for name in dirs:
+            try:
+                os.rmdir(os.path.join(root, name))
+            except OSError:
+                pass
+    return removed
+
+
+def _prune_orphaned_cache():
+    """Delete converted images, previews and transcodes with no photo left.
+
+    Renaming a location moves a photo, so its cache entries stay behind
+    under the old path for good. The Pi fills its SD card, so that
+    litter is worth clearing. A photos directory that looks empty means
+    a failed sync rather than an empty library, and pruning stops.
+
+    @returns Count of cache files removed
+    """
+    stems = _library_stems()
+    removed = 0
+    if stems:
+        for cache_dir in (HEIC_CACHE_DIR, THUMB_CACHE_DIR, VIDEO_CACHE_DIR):
+            removed += _prune_cache_dir(cache_dir, stems)
+        if removed:
+            logger.info("Pruned %d cache files with no photo behind them", removed)
+    return removed
+
+
 def _warm_media_cache():
     """Background pass: convert stale HEICs, build previews, transcode clips.
 
@@ -765,6 +827,7 @@ def _warm_media_cache():
     os.makedirs(VIDEO_CACHE_DIR, exist_ok=True)
     os.makedirs(THUMB_CACHE_DIR, exist_ok=True)
     refresh_photo_cache()
+    _prune_orphaned_cache()
     with _photo_cache_lock:
         photo_files = [p['filename'] for p in _photo_cache]
         heic_files = [name for name in photo_files if name.lower().endswith('.heic')]
