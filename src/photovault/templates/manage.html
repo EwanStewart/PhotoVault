@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="PhotoVault">
+    <meta name="theme-color" content="#12131a">
+    <title>PhotoVault Library</title>
+    <link rel="stylesheet" href="/static/manage.css">
+</head>
+<body data-signed-in="{{ 'yes' if signed_in else 'no' }}">
+    <div id="signin" class="{{ 'hidden' if signed_in }}">
+        <form id="signin-form">
+            <h1>PhotoVault</h1>
+            <label for="pin-input">Enter your PIN</label>
+            <input id="pin-input" type="password" inputmode="numeric" autocomplete="current-password"
+                   placeholder="PIN" aria-label="PIN">
+            <button type="submit">Unlock</button>
+            <p id="signin-error" class="error" role="alert"></p>
+        </form>
+    </div>
+
+    <div id="library" class="{{ '' if signed_in else 'hidden' }}">
+        <header id="library-header">
+            <h1>Library</h1>
+            <div id="library-summary"></div>
+            <div id="library-actions">
+                <button id="refresh-btn" type="button">Refresh</button>
+                <button id="select-all-btn" type="button">All on</button>
+                <button id="select-none-btn" type="button">All off</button>
+            </div>
+        </header>
+
+        <p id="library-status" role="status"></p>
+
+        <div id="photo-grid"></div>
+    </div>
+
+    <div id="toast" role="status"></div>
+
+    <script src="/static/photo-url.js"></script>
+    <script src="/static/manage-library.js"></script>
+    <script src="/static/manage.js"></script>
+</body>
+</html>

@@ -35,6 +35,26 @@ function liveVideoUrl(filename) {
     return `/photos/video/${encodePhotoPath(filename)}`;
 }
 
+/**
+ * URL that serves a small preview of a photo.
+ *
+ * @param filename Photos-relative file path
+ * @returns Route for the preview
+ */
+function thumbUrl(filename) {
+    return `/photos/thumb/${encodePhotoPath(filename)}`;
+}
+
+/**
+ * URL of the manage endpoint for one photo.
+ *
+ * @param filename Photos-relative file path
+ * @returns Route for the photo's manage endpoint
+ */
+function managePhotoUrl(filename) {
+    return `/api/manage/photos/${encodePhotoPath(filename)}`;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { photoUrl, liveVideoUrl };
+    module.exports = { photoUrl, liveVideoUrl, thumbUrl, managePhotoUrl };
 }

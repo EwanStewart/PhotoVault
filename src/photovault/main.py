@@ -7,10 +7,16 @@ import threading
 import time
 import urllib.request
 import urllib.error
+from datetime import timedelta
 from pathlib import Path
 import waitress
-from flask import Flask, render_template, jsonify, send_from_directory, redirect, request, send_file
+from flask import (Flask, render_template, jsonify, send_from_directory, redirect,
+                   request, send_file, session)
+import photovault.auth as auth
+import photovault.drive as drive
 import photovault.live_photos as live_photos
+import photovault.photo_prefs as photo_prefs
+import photovault.uploads as uploads
 import photovault.photo_organiser as photo_organiser
 from photovault.spotify_client import SpotifyClient
 from photovault.tapo_client import TapoBulbClient, COLOUR_PRESETS
@@ -71,11 +77,16 @@ CACHE_ROOT = _resolve_cache_root()
 HEIC_CACHE_DIR = os.path.join(CACHE_ROOT, 'heic')
 HEIC_MAX_DIMENSION = 1600
 VIDEO_CACHE_DIR = os.path.join(CACHE_ROOT, 'video')
+THUMB_CACHE_DIR = os.path.join(CACHE_ROOT, 'thumb')
+THUMB_MAX_DIMENSION = 400
 VIDEO_TRANSCODE_TIMEOUT_SECONDS = 300
 VIDEO_MAX_HEIGHT = 480
 VIDEO_FPS = 24
 FLAG_CACHE_DIR = os.path.join(CACHE_ROOT, 'flag')
 GEOCODE_CACHE_FILE = str(REPO_ROOT / 'geocode_cache.json')
+PHOTO_PREFS_FILE = str(REPO_ROOT / 'photo_prefs.json')
+MAX_UPLOAD_BYTES = 200 * 1024 * 1024
+MANAGE_SESSION_LIFETIME = timedelta(days=30)
 GEOCODE_SAVE_DEBOUNCE_SECONDS = 5.0
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.heic'}
 VIDEO_EXTENSIONS = {'.mov'}
@@ -89,6 +100,8 @@ _geocode_cache = {}
 _geocode_save_timer = None
 _geocode_save_lock = threading.Lock()
 _photo_cache = []
+_photo_prefs = {}
+_photo_prefs_lock = threading.Lock()
 _photo_cache_fileset = set()
 _video_fileset = set()
 _photo_cache_lock = threading.Lock()
@@ -103,7 +116,13 @@ SERVE_THREADS = 4
 # Ensure cache directories exist
 os.makedirs(HEIC_CACHE_DIR, exist_ok=True)
 os.makedirs(VIDEO_CACHE_DIR, exist_ok=True)
+os.makedirs(THUMB_CACHE_DIR, exist_ok=True)
 os.makedirs(FLAG_CACHE_DIR, exist_ok=True)
+
+app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_BYTES
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.permanent_session_lifetime = MANAGE_SESSION_LIFETIME
 
 # Hardware paths - configurable via environment variables
 BRIGHTNESS_PATH = os.environ.get('BRIGHTNESS_PATH', '/sys/class/backlight/10-0045/brightness')
@@ -555,14 +574,24 @@ def refresh_photo_cache():
     _start_enrich_thread_if_idle()
 
 
+def _public_photo(photo):
+    """One cached photo with its internal bookkeeping fields removed.
+
+    @param photo Cached photo entry
+    @returns A copy without the internal fields
+    """
+    return {k: v for k, v in photo.items() if k != '_enriched'}
+
+
 @app.route('/photos')
 def list_photos():
-    """Return cached list of photo filenames with metadata."""
+    """Return the photos the slideshow may show, with their metadata."""
     refresh_photo_cache()
+    prefs = _photo_prefs_snapshot()
 
     with _photo_cache_lock:
-        snapshot = [{k: v for k, v in p.items() if k != '_enriched'} for p in _photo_cache]
-    return jsonify(snapshot)
+        snapshot = [_public_photo(p) for p in _photo_cache]
+    return jsonify(photo_prefs.filter_enabled(prefs, snapshot))
 
 
 def _get_heic_lock(filename):
@@ -724,6 +753,299 @@ def serve_video(filename):
         return send_file(cache_path, mimetype='video/mp4')
 
     return send_from_directory(PHOTOS_DIR, filename)
+
+
+def _make_thumbnail(source_path, cache_path):
+    """Write a small JPEG preview of one photo for the manage grid.
+
+    @param source_path Path of the full-size photo
+    @param cache_path Path the preview is written to
+    """
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+    with Image.open(source_path) as img:
+        if img.mode in ('RGBA', 'P'):
+            img = img.convert('RGB')
+        img.thumbnail((THUMB_MAX_DIMENSION, THUMB_MAX_DIMENSION), Image.Resampling.LANCZOS)
+        tmp_path = cache_path + '.tmp'
+        img.save(tmp_path, 'JPEG', quality=70, optimize=True)
+    os.replace(tmp_path, cache_path)
+
+
+def _thumb_cache_path(filename):
+    """Cache location of the preview for one photo.
+
+    @param filename Photos-relative path of the photo
+    @returns Path of the cached preview
+    """
+    return os.path.join(THUMB_CACHE_DIR, os.path.splitext(filename)[0] + '.jpg')
+
+
+@app.route('/photos/thumb/<path:filename>')
+def serve_thumbnail(filename):
+    """Serve a small preview of a photo, building it on the first request."""
+    response = None
+    if not validate_filename(filename):
+        logger.warning("Invalid thumbnail requested: %s", filename)
+        response = (jsonify({'error': 'Invalid filename'}), 400)
+    else:
+        filepath = os.path.join(PHOTOS_DIR, filename)
+        cache_path = _thumb_cache_path(filename)
+        if _cache_stale(cache_path, filepath) if os.path.exists(filepath) else True:
+            with _get_heic_lock('thumb:' + filename):
+                if _cache_stale(cache_path, filepath):
+                    try:
+                        _make_thumbnail(filepath, cache_path)
+                    except Exception as e:
+                        logger.error("Failed to build thumbnail for %s: %s", filename, e)
+                        response = (jsonify({'error': 'Failed to build thumbnail'}), 500)
+        if response is None:
+            response = send_file(cache_path, mimetype='image/jpeg')
+    return response
+
+
+def _load_photo_prefs():
+    """Read the per-photo slideshow flags from disk into memory."""
+    global _photo_prefs
+    loaded = photo_prefs.load(PHOTO_PREFS_FILE)
+    with _photo_prefs_lock:
+        _photo_prefs = loaded
+
+
+def _photo_prefs_snapshot():
+    """A copy of the per-photo slideshow flags.
+
+    @returns Copy of the preference mapping
+    """
+    with _photo_prefs_lock:
+        return dict(_photo_prefs)
+
+
+def _write_photo_pref(filename, enabled):
+    """Record and persist whether the slideshow may show one photo.
+
+    @param filename Photos-relative path of the photo
+    @param enabled True to allow the photo, False to hold it back
+    """
+    with _photo_prefs_lock:
+        photo_prefs.set_enabled(_photo_prefs, filename, enabled)
+        snapshot = dict(_photo_prefs)
+    photo_prefs.save(PHOTO_PREFS_FILE, snapshot)
+
+
+def _forget_photo_pref(filename):
+    """Drop the flag held for a photo that has been deleted.
+
+    @param filename Photos-relative path of the photo
+    """
+    with _photo_prefs_lock:
+        photo_prefs.forget(_photo_prefs, filename)
+        snapshot = dict(_photo_prefs)
+    photo_prefs.save(PHOTO_PREFS_FILE, snapshot)
+
+
+@app.before_request
+def gate_protected_requests():
+    """Refuse writes and the manage surface unless the caller is authorised."""
+    decision = auth.gate_decision(
+        request.path, request.method, request.remote_addr, session,
+        request.headers.get(auth.PIN_HEADER), auth.configured_pin())
+    response = None
+    if decision == auth.LOGIN:
+        response = render_template('manage.html', signed_in=False)
+    elif decision == auth.REFUSE:
+        response = (jsonify({'error': 'Authorisation required',
+                             'pinConfigured': bool(auth.configured_pin())}), 401)
+    return response
+
+
+@app.route('/manage')
+def manage():
+    """The phone-facing page for uploading and curating the library."""
+    return render_template('manage.html', signed_in=True)
+
+
+@app.route('/api/manage/login', methods=['POST'])
+def manage_login():
+    """Exchange the PIN for a signed session cookie."""
+    data = get_json_or_error() or {}
+    if auth.pin_matches(data.get('pin'), auth.configured_pin()):
+        session[auth.SESSION_KEY] = True
+        session.permanent = True
+        response = jsonify({'status': 'ok'})
+    else:
+        logger.warning("Rejected manage sign-in from %s", request.remote_addr)
+        response = (jsonify({'error': 'Incorrect PIN'}), 401)
+    return response
+
+
+@app.route('/api/manage/logout', methods=['POST'])
+def manage_logout():
+    """Drop the manage session."""
+    session.pop(auth.SESSION_KEY, None)
+    return jsonify({'status': 'ok'})
+
+
+@app.route('/api/manage/photos')
+def manage_list_photos():
+    """Every photo in the library, each with its slideshow flag."""
+    refresh_photo_cache()
+    prefs = _photo_prefs_snapshot()
+    with _photo_cache_lock:
+        snapshot = [_public_photo(p) for p in _photo_cache]
+    for photo in snapshot:
+        photo['enabled'] = photo_prefs.is_enabled(prefs, photo['filename'])
+    return jsonify(snapshot)
+
+
+@app.route('/api/manage/photos/<path:filename>/enabled', methods=['POST'])
+def manage_set_enabled(filename):
+    """Switch one photo in or out of the slideshow."""
+    data = get_json_or_error()
+    response = None
+    if not validate_filename(filename):
+        response = (jsonify({'error': 'Invalid filename'}), 400)
+    elif not isinstance(data, dict) or not isinstance(data.get('enabled'), bool):
+        response = (jsonify({'error': 'Expected an enabled boolean'}), 400)
+    else:
+        _write_photo_pref(filename, data['enabled'])
+        response = jsonify({'filename': filename, 'enabled': data['enabled']})
+    return response
+
+
+def _cached_derivatives(filename):
+    """Cache files derived from one photo or clip.
+
+    @param filename Photos-relative path of the file
+    @returns Paths of the cached files built from it
+    """
+    stem = os.path.splitext(filename)[0]
+    return [
+        os.path.join(HEIC_CACHE_DIR, stem + '.jpg'),
+        os.path.join(THUMB_CACHE_DIR, stem + '.jpg'),
+        os.path.join(VIDEO_CACHE_DIR, stem + '.mp4'),
+    ]
+
+
+def _remove_quietly(path):
+    """Delete one file, ignoring the case where it is already gone.
+
+    @param path Path of the file to delete
+    """
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _paired_video(filename):
+    """The clip belonging to a photo, according to the photo cache.
+
+    @param filename Photos-relative path of the photo
+    @returns The clip's photos-relative path, or None
+    """
+    with _photo_cache_lock:
+        entry = next((p for p in _photo_cache if p['filename'] == filename), None)
+    return entry.get('videoFilename') if entry else None
+
+
+def _purge_local_copy(filename):
+    """Remove one file and everything cached from it.
+
+    @param filename Photos-relative path of the file
+    """
+    _remove_quietly(os.path.join(PHOTOS_DIR, filename))
+    for path in _cached_derivatives(filename):
+        _remove_quietly(path)
+
+
+def _prune_empty_local_folder(filename):
+    """Remove the location folder a deletion has just emptied.
+
+    The remote loses its empty folders through rclone, so pruning here
+    keeps the local tree matching rather than piling up empty folders.
+
+    @param filename Photos-relative path of the deleted file
+    """
+    folder = os.path.dirname(filename)
+    while folder:
+        try:
+            os.rmdir(os.path.join(PHOTOS_DIR, folder))
+        except OSError:
+            break
+        folder = os.path.dirname(folder)
+
+
+@app.route('/api/manage/photos/<path:filename>', methods=['DELETE'])
+def manage_delete_photo(filename):
+    """Delete a photo, and its Live Photo clip, from Drive and from the Pi."""
+    response = None
+    if not validate_filename(filename):
+        response = (jsonify({'error': 'Invalid filename'}), 400)
+    else:
+        targets = [filename]
+        video = _paired_video(filename)
+        if video:
+            targets.append(video)
+        try:
+            for target in targets:
+                drive.delete(PHOTO_REMOTE, target)
+        except Exception as e:
+            logger.error("Failed to delete %s from Drive: %s", filename, e)
+            response = (jsonify({'error': f'Drive delete failed: {e}'}), 502)
+        if response is None:
+            for target in targets:
+                _purge_local_copy(target)
+            _prune_empty_local_folder(filename)
+            drive.remove_empty_dir(PHOTO_REMOTE, drive.parent_folder(filename))
+            _forget_photo_pref(filename)
+            refresh_photo_cache()
+            logger.info("Deleted %s from Drive and the Pi", filename)
+            response = jsonify({'deleted': targets})
+    return response
+
+
+def _upload_lone_clip(video):
+    """Store a clip that arrived without its still, or explain the refusal.
+
+    @param video The uploaded clip, or None
+    @returns A Flask response for the request
+    """
+    response = (jsonify({'error': 'Expected a photo part'}), 400)
+    if video is not None and video.filename:
+        try:
+            stored = uploads.save_clip(PHOTOS_DIR, PHOTO_REMOTE, video)
+            refresh_photo_cache()
+            _start_heic_warm_thread_if_idle()
+            response = (jsonify(stored), 201)
+        except uploads.RejectedUpload as e:
+            response = (jsonify({'error': str(e)}), 400)
+        except Exception as e:
+            logger.error("Upload of %s failed: %s", video.filename, e)
+            response = (jsonify({'error': f'Upload failed: {e}'}), 502)
+    return response
+
+
+@app.route('/api/upload', methods=['POST'])
+def upload_photo():
+    """Store a photo sent from the phone, with its Live Photo clip when present."""
+    photo = request.files.get('photo')
+    video = request.files.get('video')
+    response = None
+    if photo is None or not photo.filename:
+        response = _upload_lone_clip(video)
+    else:
+        try:
+            stored = uploads.save(PHOTOS_DIR, PHOTO_REMOTE, photo, video or None)
+        except uploads.RejectedUpload as e:
+            response = (jsonify({'error': str(e)}), 400)
+        except Exception as e:
+            logger.error("Upload of %s failed: %s", photo.filename, e)
+            response = (jsonify({'error': f'Upload failed: {e}'}), 502)
+        if response is None:
+            refresh_photo_cache()
+            _start_heic_warm_thread_if_idle()
+            response = (jsonify(stored), 201)
+    return response
 
 
 @app.route('/flags/<country_code>.svg')
@@ -1243,6 +1565,7 @@ def _warm_caches_on_startup():
 def serve():
     """Start the app under a threaded WSGI server."""
     load_geocode_cache_from_disk()
+    _load_photo_prefs()
     _warm_caches_on_startup()
     logger.info("Starting Photo Frame server on %s:5000", BIND_HOST)
     waitress.serve(app, host=BIND_HOST, port=5000, threads=SERVE_THREADS)

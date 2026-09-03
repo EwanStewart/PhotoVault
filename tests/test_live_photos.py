@@ -203,3 +203,15 @@ def test_new_video_triggers_re_enrichment(monkeypatch, tmp_path):
     main.refresh_photo_cache()
 
     assert all(not p['_enriched'] for p in main._photo_cache)
+
+
+def test_an_uploaded_pair_shares_its_stem_so_it_matches_without_timestamps():
+    """The upload path renames a clip after its still, so basename pairing wins."""
+    entries = [
+        {'SourceFile': '/photos/IMG_7788.HEIC'},
+        {'SourceFile': '/photos/IMG_7788.MOV'},
+    ]
+
+    pairs = live_photos._build_pairs(entries, '/photos')
+
+    assert pairs == {'IMG_7788.HEIC': 'IMG_7788.MOV'}
