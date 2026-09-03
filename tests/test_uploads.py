@@ -1,3 +1,6 @@
+import os
+import time
+
 import pytest
 
 import photovault.uploads as uploads
@@ -150,3 +153,25 @@ def test_a_lone_file_that_is_not_a_clip_is_rejected(tmp_path):
     with pytest.raises(uploads.RejectedUpload):
         uploads.save_clip(str(photos_dir), 'gdrive:PhotoFrame', FakeFile('a.jpg'),
                           upload=lambda remote, local, dest: None)
+
+
+def test_stale_staging_files_are_swept_away(tmp_path):
+    photos_dir = tmp_path / 'photos'
+    staging = photos_dir / uploads.STAGING_DIR_NAME
+    staging.mkdir(parents=True)
+    stale = staging / 'IMG_1.jpeg.part'
+    fresh = staging / 'IMG_2.jpeg.part'
+    stale.write_bytes(b'orphaned by a crash')
+    fresh.write_bytes(b'still uploading')
+    old = time.time() - uploads.STAGING_MAX_AGE_SECONDS - 60
+    os.utime(stale, (old, old))
+
+    swept = uploads.sweep_staging(str(photos_dir))
+
+    assert swept == 1
+    assert not stale.exists()
+    assert fresh.exists()
+
+
+def test_sweeping_copes_with_no_staging_directory(tmp_path):
+    assert uploads.sweep_staging(str(tmp_path)) == 0

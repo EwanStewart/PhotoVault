@@ -14,6 +14,7 @@ time.
 import logging
 import os
 import re
+import time
 
 import photovault.drive as drive
 
@@ -24,6 +25,7 @@ VIDEO_EXTENSIONS = {'.mov'}
 STAGING_DIR_NAME = '.uploads'
 STAGING_SUFFIX = '.part'
 MAX_STEM_LENGTH = 80
+STAGING_MAX_AGE_SECONDS = 3600
 UNSAFE_CHARACTERS = re.compile(r'[^A-Za-z0-9._-]')
 
 
@@ -228,3 +230,28 @@ def save_clip(photos_dir, remote, video, upload=None):
 
     logger.info("Stored clip %s awaiting its still", name)
     return {'photo': None, 'video': name}
+
+
+def sweep_staging(photos_dir):
+    """Delete staged files a crash left behind mid-upload.
+
+    A part file is removed only once it is too old to belong to an
+    upload still in flight.
+
+    @param photos_dir Root of the local photos directory
+    @returns Count of stale files removed
+    """
+    staging_dir = os.path.join(photos_dir, STAGING_DIR_NAME)
+    cutoff = time.time() - STAGING_MAX_AGE_SECONDS
+    removed = 0
+    try:
+        for name in os.listdir(staging_dir):
+            path = os.path.join(staging_dir, name)
+            if name.endswith(STAGING_SUFFIX) and os.path.getmtime(path) < cutoff:
+                os.remove(path)
+                removed += 1
+    except OSError:
+        removed = removed
+    if removed:
+        logger.info("Swept %d stale staged upload(s)", removed)
+    return removed

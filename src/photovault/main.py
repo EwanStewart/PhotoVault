@@ -1663,6 +1663,7 @@ def serve():
     """Start the app under a threaded WSGI server."""
     load_geocode_cache_from_disk()
     _load_photo_prefs()
+    uploads.sweep_staging(PHOTOS_DIR)
     _warm_caches_on_startup()
     logger.info("Starting Photo Frame server on %s:5000", BIND_HOST)
     waitress.serve(app, host=BIND_HOST, port=5000, threads=SERVE_THREADS)
