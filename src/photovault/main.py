@@ -477,6 +477,16 @@ def index():
     return render_template('index.html')
 
 
+@app.route('/manifest.webmanifest')
+def manifest():
+    """Serve the install metadata a phone reads when adding to the home screen.
+
+    @returns The manifest file with the media type a browser expects
+    """
+    return send_from_directory(app.static_folder, 'manifest.webmanifest',
+                               mimetype='application/manifest+json')
+
+
 def _current_pair_map():
     """Live Photo pairs for the library, rescanned at most twice a minute.
 

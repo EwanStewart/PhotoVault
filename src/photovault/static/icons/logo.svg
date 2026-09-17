@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%" role="img" aria-label="PhotoVault">
+  <rect width="512" height="512" rx="113" fill="#12131a"/>
+  <rect x="168" y="118" width="236" height="120" rx="26" fill="#6fa8ff" opacity="0.45"/>
+  <clipPath id="card">
+    <rect x="124" y="180" width="264" height="216" rx="30"/>
+  </clipPath>
+  <rect x="124" y="180" width="264" height="216" rx="30" fill="#6fa8ff"/>
+  <g clip-path="url(#card)">
+    <circle cx="186" cy="244" r="25" fill="#12131a"/>
+    <path d="M 124 396 L 214 286 L 284 366 L 326 318 L 388 396 Z" fill="#12131a"/>
+  </g>
+</svg>
